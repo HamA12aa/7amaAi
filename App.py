@@ -7,32 +7,32 @@ import tempfile
 import sqlite3
 import json
 import hashlib
+import concurrent.futures
 
 # ==========================================
-# 0. DATABASE MANAGER (ANTI-REFRESH ULTIMATE FIX)
+# 0. DATABASE MANAGER (V14 - TITAN EDITION)
 # ==========================================
-# ئەم بەشە ڕێگری دەکات لە سڕینەوەی داتا، تەنانەت ئەگەر بڕاوسەرەکەش دابخەیت!
 def init_db():
-    conn = sqlite3.connect('studio_pro_database.db', check_same_thread=False)
+    conn = sqlite3.connect('studio_pro_v14.db', check_same_thread=False)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS projects
                  (srt_hash TEXT PRIMARY KEY, 
                   last_input TEXT, 
                   master_context TEXT, 
-                  translated_chunks TEXT, 
-                  reviewed_chunks TEXT)''')
+                  enriched_chunks TEXT,
+                  translated_chunks TEXT)''')
     conn.commit()
     return conn
 
 def get_srt_hash(srt_text):
     return hashlib.md5(srt_text.encode('utf-8')).hexdigest()
 
-def save_state_to_db(conn, srt_hash, last_input, master_context, trans_chunks, rev_chunks):
+def save_state_to_db(conn, srt_hash, last_input, master_context, enriched, translated):
     c = conn.cursor()
     c.execute('''INSERT OR REPLACE INTO projects 
-                 (srt_hash, last_input, master_context, translated_chunks, reviewed_chunks) 
+                 (srt_hash, last_input, master_context, enriched_chunks, translated_chunks) 
                  VALUES (?, ?, ?, ?, ?)''', 
-              (srt_hash, last_input, master_context, json.dumps(trans_chunks), json.dumps(rev_chunks)))
+              (srt_hash, last_input, master_context, json.dumps(enriched), json.dumps(translated)))
     conn.commit()
 
 def load_state_from_db(conn, srt_hash):
@@ -43,48 +43,43 @@ def load_state_from_db(conn, srt_hash):
         return {
             'last_input': row[1],
             'master_context': row[2],
-            'translated_chunks': json.loads(row[3]) if row[3] else {},
-            'reviewed_chunks': json.loads(row[4]) if row[4] else {}
+            'enriched_chunks': json.loads(row[3]) if row[3] else {},
+            'translated_chunks': json.loads(row[4]) if row[4] else {}
         }
     return None
 
-# جێگیرکردنی داتابەیس
 db_conn = init_db()
 
 # ==========================================
-# 1. PRO STUDIO UI & CSS (10x Better)
+# 1. UI & CSS (10X BETTER)
 # ==========================================
-st.set_page_config(page_title="AI Movie Studio PRO | V13 Ultimate", layout="wide", page_icon="🎬")
+st.set_page_config(page_title="AI Movie Studio PRO | V14 Titan", layout="wide", page_icon="🎬")
 
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;800&display=swap');
-    html, body, [data-testid="stSidebar"], .stMarkdown { font-family: 'Vazirmatn', sans-serif; background-color: #0b0f19;}
+    html, body, [data-testid="stSidebar"], .stMarkdown { font-family: 'Vazirmatn', sans-serif; background-color: #050505;}
     
-    .main-title { text-align: center; font-weight: 800; background: linear-gradient(90deg, #ff4b4b, #ff904f, #ff4b4b); background-size: 200% auto; -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 5px; font-size: 3.5rem; animation: shine 3s linear infinite;}
-    @keyframes shine { to { background-position: 200% center; } }
+    .main-title { text-align: center; font-weight: 900; background: linear-gradient(90deg, #ff0055, #ffaa00, #00ffcc, #ff0055); background-size: 300% auto; -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 5px; font-size: 3.8rem; animation: shine 4s linear infinite; text-shadow: 0px 5px 15px rgba(255,0,85,0.2);}
+    @keyframes shine { to { background-position: 300% center; } }
     
-    .sub-title { text-align: center; color: #a0a0a0; margin-bottom: 30px; font-size: 1.2rem; letter-spacing: 1px;}
+    .sub-title { text-align: center; color: #888; margin-bottom: 30px; font-size: 1.3rem; letter-spacing: 2px; text-transform: uppercase;}
     
-    .status-box { background: rgba(20, 25, 35, 0.9); border: 1px solid #333; padding: 18px; border-radius: 12px; margin-bottom: 15px; border-right: 5px solid #00ffcc; color: #fff; box-shadow: 0 4px 15px rgba(0, 255, 204, 0.1); transition: 0.3s;}
-    .status-box:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0, 255, 204, 0.2); }
+    .status-box { background: rgba(15, 15, 20, 0.95); border: 1px solid #222; padding: 20px; border-radius: 12px; margin-bottom: 15px; border-left: 5px solid #ffaa00; color: #eee; box-shadow: 0 5px 20px rgba(255, 170, 0, 0.1);}
     
-    .live-preview-box { background: linear-gradient(145deg, #11151c, #1a202c); padding: 25px; border-radius: 15px; border-top: 5px solid #ff4b4b; color: #e2e8f0; direction: rtl; text-align: right; height: 400px; overflow-y: auto; font-size: 1.15em; line-height: 1.8; box-shadow: inset 0 0 10px rgba(0,0,0,0.5);}
+    .console-box { background: #0a0a0a; border: 1px solid #333; border-radius: 8px; padding: 15px; color: #00ffcc; font-family: 'Courier New', monospace; font-size: 0.9em; height: 200px; overflow-y: auto; direction: ltr; margin-bottom: 20px;}
     
-    .stTextArea textarea { direction: ltr !important; font-family: 'Courier New', monospace; background-color: #0d1117; color: #00ffcc; border: 1px solid #30363d; border-radius: 10px; padding: 15px;}
-    .stTextArea textarea:focus { border-color: #ff4b4b; box-shadow: 0 0 10px rgba(255, 75, 75, 0.3); }
+    .live-preview-box { background: linear-gradient(180deg, #111, #0a0a0a); padding: 25px; border-radius: 15px; border-top: 5px solid #00ffcc; color: #fff; direction: rtl; text-align: right; height: 400px; overflow-y: auto; font-size: 1.2em; line-height: 1.9; box-shadow: 0 10px 30px rgba(0,255,204,0.15);}
     
-    .stButton>button { width: 100%; border-radius: 12px; height: 3.5em; background: linear-gradient(90deg, #ff4b4b 0%, #d42222 100%); color: white; font-size: 1.2em; font-weight: bold; border: none; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); text-transform: uppercase; letter-spacing: 1px;}
-    .stButton>button:hover { transform: scale(1.03); box-shadow: 0 8px 25px rgba(255, 75, 75, 0.5); border: none;}
+    .stButton>button { width: 100%; border-radius: 12px; height: 3.5em; background: linear-gradient(90deg, #ff0055 0%, #aa00ff 100%); color: white; font-size: 1.2em; font-weight: bold; border: none; transition: 0.3s;}
+    .stButton>button:hover { transform: scale(1.02); box-shadow: 0 10px 30px rgba(255, 0, 85, 0.4); }
     
-    .stProgress > div > div > div > div { background-image: linear-gradient(90deg, #00ffcc, #00b3ff); transition: width 0.5s ease; }
-    
-    .agent-badge { display: inline-block; padding: 5px 10px; border-radius: 20px; font-size: 0.8em; font-weight: bold; margin-bottom: 5px; background: #2d3748; color: #fff;}
+    .agent-badge { display: inline-block; padding: 5px 12px; border-radius: 20px; font-size: 0.85em; font-weight: bold; margin-bottom: 10px; background: #222; color: #00ffcc; border: 1px solid #00ffcc;}
     </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. SRT PARSER & BUILDER (Agent 5)
+# 2. SRT PARSER & BUILDER (Untouched Timelines)
 # ==========================================
 def parse_srt(srt_string):
     srt_string = srt_string.replace('\r\n', '\n').strip()
@@ -100,149 +95,154 @@ def build_srt(parsed_list):
     return '\n\n'.join([f"{item['id']}\n{item['time']}\n{item['text']}" for item in parsed_list])
 
 # ==========================================
-# 3. AGENT 1: STORY ANALYZER (Video + Text intact)
+# 3. AGENT 1: STORY & VIDEO ANALYST
 # ==========================================
-def analyze_master_context(active_keys, model_name, srt_text, glossary, video_file=None):
-    prompt = f"""You are the Master Story Analyst (Agent 1).
-Analyze this subtitle file and create a highly detailed Translation Bible.
-Include: Story Summary, Character tone (Age, gender, aggression level), and Cultural notes.
-Glossary of specific words to use: {glossary}
-Subtitles snippet: {srt_text[:12000]}"""
+def agent_1_analyze(active_keys, model_name, srt_text, glossary, video_file=None):
+    prompt = f"""You are AGENT 1: The Master Anime Director.
+Analyze this subtitle snippet and create a 'Translation Bible'.
+1. Identify the main plot and emotion.
+2. Identify characters, their age, and tone (Aggressive, soft, formal).
+3. Provide rules for the translators based on the glossary.
+Glossary: {glossary}
+Subtitles: {srt_text[:10000]}"""
     
-    for current_key in active_keys:
-        genai.configure(api_key=current_key)
-        model = genai.GenerativeModel(model_name)
-        contents = [prompt]
+    for key in active_keys:
+        genai.configure(api_key=key)
         try:
+            model = genai.GenerativeModel(model_name)
+            contents = [prompt]
             if video_file:
-                with st.spinner("⏳ بریکاری ١: خەریکی ناردنی ڤیدیۆکەیە بۆ شیکاریی قوڵ (تایم ئاوت: ١٢٠ چرکە)..."):
-                    video_file.seek(0)
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
-                        tmp.write(video_file.read())
-                        v_path = tmp.name
-                    g_file = genai.upload_file(path=v_path)
-                    
-                    start_time = time.time()
-                    while g_file.state.name == "PROCESSING":
-                        if time.time() - start_time > 120:
-                            st.warning("⚠️ ڤیدیۆکە زۆری خایاند، تەنها دەق بەکاردێنین.")
-                            break
-                        time.sleep(3)
-                        g_file = genai.get_file(g_file.name)
-                    if g_file.state.name == "ACTIVE":
-                        contents.insert(0, g_file)
-                        
-            with st.spinner("🕵️ بریکاری ١: شیکردنەوەی چیرۆک و دروستکردنی کەسایەتییەکان..."):
-                response = model.generate_content(contents)
-                return response.text
-        except Exception as e:
-            continue
-    return "⚠️ نەتوانرا چیرۆکەکە بەتەواوی شیکار بکرێت، بەڵام وەرگێڕانەکە بەردەوام دەبێت..."
+                video_file.seek(0)
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
+                    tmp.write(video_file.read())
+                    v_path = tmp.name
+                g_file = genai.upload_file(path=v_path)
+                while g_file.state.name == "PROCESSING":
+                    time.sleep(3)
+                    g_file = genai.get_file(g_file.name)
+                if g_file.state.name == "ACTIVE":
+                    contents.insert(0, g_file)
+            return model.generate_content(contents).text
+        except Exception as e: continue
+    return "Basic Context: Translate dynamically."
 
 # ==========================================
-# 4. AGENTS 2, 3 & 7: SUGGESTER, TRANSLATOR, SPLITTER
+# 4. AGENT 2: THE ENRICHER (Fix English + Add Japanese + Suggestions)
 # ==========================================
-def translate_and_suggest_chunk(chunk, active_keys, master_context, visual_container, selected_model):
+def agent_2_enrich_chunk(chunk, active_keys, master_context, selected_model):
+    # ناردنی پارچەی بچووک بۆ ئەوەی هەرگیز هەڵە نەکات
     xml_input = "".join([f'<sub id="{item["id"]}">{item["text"].replace("<","").replace(">","")}</sub>\n' for item in chunk])
-
-    prompt = f"""You are Agent 2 (Suggester), Agent 3 (Translator), and Agent 7 (Splitter).
+    
+    prompt = f"""You are AGENT 2: The Deep Context Enricher.
 Master Context: {master_context}
 
-PROCESS FOR EACH LINE:
-1. Think of 3 Kurdish Sorani translations (Literal, Simple, Cinematic Anime).
-2. Choose the absolute BEST cinematic one.
-3. NO SHORTENING! Translate every single English word/feeling.
-4. SPLIT LOGIC (Agent 7): If the Kurdish translation is very long (over 45 characters), split it into two lines using \n so it looks beautiful on the screen.
-5. ONLY output XML.
+For every single line in the input, you MUST output an enriched XML format. 
+1. Fix the English text if it's broken.
+2. Guess the Japanese Romaji or Anime expression they are likely saying.
+3. Provide the Scene Emotion.
+4. Give 3 Kurdish Sorani suggestions (Literal, Simple, Cinematic).
 
 Input:
 {xml_input}
 
-Output Format:
-<sub id="1">Kurdish Text\nSecond line if long</sub>
+Output EXACTLY like this for every line, do not miss any ID:
+<sub id="1">
+    <fixed_eng>...</fixed_eng>
+    <jp_guess>...</jp_guess>
+    <emotion>...</emotion>
+    <sug1>...</sug1>
+    <sug2>...</sug2>
+    <sug3>...</sug3>
+</sub>
 """
     attempts = 0
-    while attempts < len(active_keys) * 3:
+    while attempts < len(active_keys) * 2:
         key = random.choice(active_keys)
         try:
-            visual_container.markdown(f"<div class='status-box'><span class='agent-badge'>Agent 2, 3 & 7</span><br>⚡ <b>قۆناغی ١:</b> پێشنیارکردن، وەرگێڕان، و ڕێکخستنی دێڕەکان (٣٠ دێڕ)... <br><small>🔑 کلیل: ***{key[-4:]}</small></div>", unsafe_allow_html=True)
             genai.configure(api_key=key)
-            model = genai.GenerativeModel(selected_model, generation_config={"temperature": 0.25})
+            model = genai.GenerativeModel(selected_model, generation_config={"temperature": 0.3})
+            res = model.generate_content(prompt).text.replace('```xml', '').replace('```', '').strip()
             
-            response = model.generate_content(prompt)
-            clean_res = response.text.replace('```xml', '').replace('```', '').strip()
-            matches = re.findall(r'<sub id="(\d+)"\s*>(.*?)</sub>', clean_res, re.DOTALL | re.IGNORECASE)
-            
-            if matches: return {m[0].strip(): m[1].strip() for m in matches}
-            time.sleep(1)
-        except Exception as e:
-            if "429" in str(e) or "ResourceExhausted" in str(e): time.sleep(2)
+            # دەرهێنانی داتا زەبەلاحەکە
+            enriched_data = {}
+            blocks = re.findall(r'<sub id="(\d+)"\s*>(.*?)</sub>', res, re.DOTALL)
+            for b_id, content in blocks:
+                enriched_data[b_id.strip()] = content.strip()
+            if enriched_data: return enriched_data
+        except: time.sleep(1)
         attempts += 1
     return None
 
 # ==========================================
-# 5. AGENT 4: THE DIRECTOR (50 LINES QC REVIEWER)
+# 5. AGENT 3: THE SWARM TRANSLATOR (10 LINES AT A TIME)
 # ==========================================
-def review_50_lines(chunk_50, active_keys, master_context, visual_container, selected_model):
-    xml_input = "".join([f'<sub id="{item["id"]}">\nENG: {item["eng_text"]}\nKUR: {item["text"]}\n</sub>\n' for item in chunk_50])
+def swarm_worker_translate(chunk_10, enriched_data_map, key, selected_model):
+    # ئەمە ئەو بریکارەیە کە لەناو شانەی هەنگەکەدا تەنها ١٠ دێڕ دەکات
+    input_text = ""
+    for item in chunk_10:
+        b_id = str(item['id'])
+        context = enriched_data_map.get(b_id, f"<fixed_eng>{item['text']}</fixed_eng>")
+        input_text += f'<sub id="{b_id}">\n{context}\n</sub>\n\n'
 
-    prompt = f"""You are Agent 4: The Director & Final Reviewer for this Anime.
-Master Context: {master_context}
-
-Task: Review these 50 translated lines. 
-1. Compare Kurdish (KUR) against the original English (ENG).
-2. Fix robotic translations. Make sure it sounds 100% like natural, dramatic Kurdish Sorani.
-3. ENSURE NO MEANING IS LOST. If the original has 2 sentences, Kurdish must have 2 sentences.
-4. Output ONLY the improved XML. Do not change the IDs.
+    prompt = f"""You are AGENT 3: The Final Translator.
+You have 10 lines. Look at the <fixed_eng>, <jp_guess>, and the 3 Kurdish suggestions.
+Your ONLY job is to output the final, perfect, cinematic Kurdish Sorani translation.
+Rule 1: NEVER SHORTEN THE TEXT.
+Rule 2: DO NOT MISS ANY ID.
+Rule 3: If text is >45 chars, split with \n.
 
 Input:
-{xml_input}
+{input_text}
 
-Output Format ONLY:
-<sub id="1">Improved Kurdish Text</sub>
+Output ONLY this XML format:
+<sub id="X">Perfect Kurdish Text</sub>
 """
-    attempts = 0
-    while attempts < len(active_keys) * 3:
-        key = random.choice(active_keys)
-        try:
-            visual_container.markdown(f"<div class='status-box' style='border-right-color: #ff904f;'><span class='agent-badge'>Agent 4</span><br>🧐 <b>قۆناغی ٢ (پێداچوونەوە):</b> شیکاری ٥٠ دێڕ بۆ دڵنیابوون لە هەمان هەستی ژاپۆنییەکە... <br><small>🔑 کلیل: ***{key[-4:]}</small></div>", unsafe_allow_html=True)
-            genai.configure(api_key=key)
-            model = genai.GenerativeModel(selected_model, generation_config={"temperature": 0.15})
-            
-            response = model.generate_content(prompt)
-            clean_res = response.text.replace('```xml', '').replace('```', '').strip()
-            matches = re.findall(r'<sub id="(\d+)"\s*>(.*?)</sub>', clean_res, re.DOTALL | re.IGNORECASE)
-            
-            if matches: return {m[0].strip(): m[1].strip() for m in matches}
-            time.sleep(1)
-        except Exception as e:
-            if "429" in str(e) or "ResourceExhausted" in str(e): time.sleep(2)
-        attempts += 1
+    try:
+        genai.configure(api_key=key)
+        model = genai.GenerativeModel(selected_model, generation_config={"temperature": 0.1})
+        res = model.generate_content(prompt).text.replace('```xml', '').replace('```', '').strip()
+        matches = re.findall(r'<sub id="(\d+)"\s*>(.*?)</sub>', res, re.DOTALL)
+        if matches: return {m[0].strip(): m[1].strip() for m in matches}
+    except: pass
     return None
 
-# ==========================================
-# 6. MAIN UI & STATE INITIALIZATION
-# ==========================================
-st.markdown("<h1 class='main-title'>AI Movie Studio PRO 🎬 V13</h1>", unsafe_allow_html=True)
-st.markdown("<p class='sub-title'>سیستەمی ٧ بریکار | داتابەیسی ناوخۆیی (Anti-Refresh) | شکاندنی دێڕی درێژ | پێداچوونەوەی ٥٠ دێڕی</p>", unsafe_allow_html=True)
+def process_50_lines_in_swarm(chunk_50, enriched_data_map, keys, selected_model):
+    # دابەشکردنی ٥٠ دێڕەکە بۆ ٥ پارچەی ١٠ دێڕی
+    chunks_10 = [chunk_50[i:i+10] for i in range(0, len(chunk_50), 10)]
+    final_results = {}
+    
+    # لێرەدا فێڵە گەورەکەیە: هەر ١٠ دێڕێک بە بەکارهێنانی کلیلێکی جیاواز لە یەک کاتدا (Parallel) دەڕوات
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(keys)) as executor:
+        futures = []
+        for i, c10 in enumerate(chunks_10):
+            k = keys[i % len(keys)]
+            futures.append(executor.submit(swarm_worker_translate, c10, enriched_data_map, k, selected_model))
+            
+        for future in concurrent.futures.as_completed(futures):
+            res = future.result()
+            if res: final_results.update(res)
+            
+    return final_results
 
-# Initialization of Streamlit State
-if "state_loaded" not in st.session_state:
-    st.session_state.translated_chunks = {}
-    st.session_state.reviewed_chunks = {}
-    st.session_state.master_context = ""
-    st.session_state.is_translating = False
-    st.session_state.final_srt = ""
+# ==========================================
+# 6. MAIN UI & INITIALIZATION
+# ==========================================
+st.markdown("<h1 class='main-title'>AI Movie Studio PRO 🎬 V14 TITAN</h1>", unsafe_allow_html=True)
+st.markdown("<p class='sub-title'>سیستەمی شانەی هەنگ (Swarm AI) | شیکاری ژاپۆنی | خێرایی خەیاڵی</p>", unsafe_allow_html=True)
+
+if "current_hash" not in st.session_state:
     st.session_state.current_hash = ""
-    st.session_state.state_loaded = True
+    st.session_state.master_context = ""
+    st.session_state.enriched_chunks = {}
+    st.session_state.translated_chunks = {}
+    st.session_state.is_running = False
 
 with st.sidebar:
-    st.header("🔑 کلیلەکان (Agent 6: Load Balancer)")
+    st.header("🔑 کلیلەکان (Swarm Engine)")
     api_inputs = [st.text_input(f"Slot {i+1}", type="password") for i in range(4)]
     active_keys = [k.strip() for k in api_inputs if k.strip()]
     
     st.markdown("---")
-    st.header("🤖 مۆدێلەکان")
     gemini_model_name = None
     if active_keys:
         try:
@@ -252,129 +252,115 @@ with st.sidebar:
         except: st.error("⚠️ کێشەی کلیل.")
             
     st.markdown("---")
-    glossary = st.text_area("📚 فەرهەنگ (Agent 1)", placeholder="وشە تایبەتەکان لێرە بنووسە...")
-    uploaded_video = st.file_uploader("🎥 ڤیدیۆ (بۆ هەستی کارەکتەرەکان)", type=['mp4'])
+    glossary = st.text_area("📚 فەرهەنگ", placeholder="وشەکان...")
+    uploaded_video = st.file_uploader("🎥 ڤیدیۆ", type=['mp4'])
 
-tab1, tab2, tab3 = st.tabs(["📥 ١. فایلی SRT", "⚙️ ٢. ستۆدیۆی ٧-بریکار", "✅ ٣. بەرهەمی کۆتایی"])
+tab1, tab2, tab3 = st.tabs(["📥 ١. پڕۆژە", "⚙️ ٢. ستۆدیۆی ئەلیکترۆنی", "✅ ٣. بەرهەم"])
 
 with tab1:
-    input_srt = st.text_area("دەقی SRT لێرە دابنێ:", height=300)
-    start_btn = st.button("🚀 دەستپێکردن / بەردەوامبوون (Auto-Resume)")
-
-if start_btn:
-    if not input_srt or not active_keys or not gemini_model_name:
-        st.error("کلیل و دەق و مۆدێل پێویستە!")
-    else:
-        new_hash = get_srt_hash(input_srt)
-        
-        # گەڕان بەدوای داتادا لەناو داتابەیس ئەگەر ڕیفرێش کرابێت
-        db_data = load_state_from_db(db_conn, new_hash)
-        
-        if db_data:
-            st.session_state.translated_chunks = {int(k): v for k, v in db_data['translated_chunks'].items()}
-            st.session_state.reviewed_chunks = {int(k): v for k, v in db_data['reviewed_chunks'].items()}
-            st.session_state.master_context = db_data['master_context']
-            st.toast("🔄 داتا لە داتابەیسەوە هێنرایەوە! هیچت نەفەوتاوە.")
-        elif new_hash != st.session_state.current_hash:
-            st.session_state.translated_chunks = {}
-            st.session_state.reviewed_chunks = {}
-            st.session_state.master_context = ""
-            
-        st.session_state.current_hash = new_hash
-        st.session_state.is_translating = True
+    input_srt = st.text_area("دەقی SRT لێرە دابنێ (٤٠٠ دێڕ بە ٥ خولەک!):", height=300)
+    if st.button("🚀 وەرگێڕانی تایتان دەستپێبکە"):
+        if input_srt and active_keys:
+            new_hash = get_srt_hash(input_srt)
+            db_data = load_state_from_db(db_conn, new_hash)
+            if db_data:
+                st.session_state.master_context = db_data['master_context']
+                st.session_state.enriched_chunks = {int(k): v for k, v in db_data['enriched_chunks'].items()}
+                st.session_state.translated_chunks = {int(k): v for k, v in db_data['translated_chunks'].items()}
+                st.toast("🔄 داتا لە Database هێنرایەوە!")
+            elif new_hash != st.session_state.current_hash:
+                st.session_state.master_context = ""
+                st.session_state.enriched_chunks = {}
+                st.session_state.translated_chunks = {}
+            st.session_state.current_hash = new_hash
+            st.session_state.is_running = True
+            st.session_state.start_time = time.time()
 
 # ==========================================
-# 7. THE MAIN ENGINE (PIPELINE)
+# 7. THE TITAN ENGINE (PIPELINE)
 # ==========================================
-if st.session_state.is_translating:
+if st.session_state.is_running:
     with tab2:
+        # Time Tracker
+        elapsed = int(time.time() - st.session_state.start_time)
+        st.markdown(f"⏱️ **کاتی تێپەڕبوو:** {elapsed // 60} خولەک و {elapsed % 60} چرکە")
+
+        # --- AGENT 1 ---
         if not st.session_state.master_context:
-            st.session_state.master_context = analyze_master_context(active_keys, gemini_model_name, input_srt, glossary, uploaded_video)
-            save_state_to_db(db_conn, st.session_state.current_hash, input_srt, st.session_state.master_context, st.session_state.translated_chunks, st.session_state.reviewed_chunks)
-            st.success("✅ چیرۆک شیکرایەوە و لە داتابەیس پاشەکەوت کرا.")
+            with st.spinner("🕵️ بریکاری ١: شیکاری ڤیدیۆ و چیرۆک..."):
+                st.session_state.master_context = agent_1_analyze(active_keys, gemini_model_name, input_srt, glossary, uploaded_video)
+                save_state_to_db(db_conn, st.session_state.current_hash, input_srt, st.session_state.master_context, st.session_state.enriched_chunks, st.session_state.translated_chunks)
+        
+        with st.expander("👁️ بینینی مێشکی بریکاری ١ (Master Context)", expanded=False):
+            st.markdown(f"<div class='console-box'>{st.session_state.master_context}</div>", unsafe_allow_html=True)
 
         parsed_data = parse_srt(input_srt)
         
-        # --- PHASE 1: TRANSLATE (30 LINES) ---
-        chunk_size_1 = 30
-        trans_chunks = [parsed_data[i:i+chunk_size_1] for i in range(0, len(parsed_data), chunk_size_1)]
+        # --- AGENT 2 (ENRICHER) ---
+        st.markdown("### 🧠 قۆناغی دروستکردنی Blueprint (ئینگلیزی، ژاپۆنی، پێشنیار)")
+        enrich_chunks = [parsed_data[i:i+20] for i in range(0, len(parsed_data), 20)] # ٢٠ دێڕ بە ٢٠ دێڕ بۆ دڵنیایی
+        enrich_bar = st.progress(0)
         
-        st.markdown("### 🔄 قۆناغی یەکەم: وەرگێڕانی خێرا و شکاندنی دێڕەکان")
-        prog_bar_1 = st.progress(0)
-        status_box_1 = st.empty()
-        
-        all_translated_items = []
-        for i, chunk in enumerate(trans_chunks):
-            if i not in st.session_state.translated_chunks:
-                res = translate_and_suggest_chunk(chunk, active_keys, st.session_state.master_context, status_box_1, gemini_model_name)
-                temp_chunk = []
-                for item in chunk:
-                    new_item = item.copy()
-                    new_item['eng_text'] = item['text'] # سەیڤکردنی ئینگلیزی بۆ قۆناغی ٢
-                    if res and str(item['id']) in res:
-                        new_item['text'] = res[str(item['id'])]
-                    temp_chunk.append(new_item)
-                st.session_state.translated_chunks[i] = temp_chunk
-                # سەیڤکردن لە داتابەیس دوای هەر پارچەیەک
-                save_state_to_db(db_conn, st.session_state.current_hash, input_srt, st.session_state.master_context, st.session_state.translated_chunks, st.session_state.reviewed_chunks)
+        flat_enriched_data = {}
+        for i, chunk in enumerate(enrich_chunks):
+            if i not in st.session_state.enriched_chunks:
+                res = agent_2_enrich_chunk(chunk, active_keys, st.session_state.master_context, gemini_model_name)
+                if res:
+                    st.session_state.enriched_chunks[i] = res
+                    save_state_to_db(db_conn, st.session_state.current_hash, input_srt, st.session_state.master_context, st.session_state.enriched_chunks, st.session_state.translated_chunks)
             
-            all_translated_items.extend(st.session_state.translated_chunks[i])
-            prog_bar_1.progress((i + 1) / len(trans_chunks))
+            if i in st.session_state.enriched_chunks:
+                flat_enriched_data.update(st.session_state.enriched_chunks[i])
+            enrich_bar.progress((i + 1) / len(enrich_chunks))
             
-        status_box_1.empty()
-        st.success("✅ قۆناغی یەکەم تەواو بوو! دەستپێکردنی قۆناغی دووەم (پێداچوونەوەی سینەمایی)...")
+        with st.expander("👁️ بینینی کاری بریکاری ٢ (دەقی دەوڵەمەندکراو)", expanded=False):
+            sample_enrich = list(flat_enriched_data.values())[:3]
+            st.markdown(f"<div class='console-box'>{str(sample_enrich)}</div>", unsafe_allow_html=True)
 
-        # --- PHASE 2: REVIEW (50 LINES) ---
-        chunk_size_2 = 50
-        review_chunks = [all_translated_items[i:i+chunk_size_2] for i in range(0, len(all_translated_items), chunk_size_2)]
-        
-        st.markdown("### 🧐 قۆناغی دووەم: پێداچوونەوەی ٥٠ دێڕ بە ٥٠ دێڕ")
-        prog_bar_2 = st.progress(0)
-        review_status = st.empty()
+        # --- AGENT 3 (SWARM TRANSLATORS - PARALLEL) ---
+        st.markdown("### 🐝 قۆناغی وەرگێڕانی شانەی هەنگ (٥٠ دێڕ پێکەوە، دابەشی ١٠)")
+        translate_chunks = [parsed_data[i:i+50] for i in range(0, len(parsed_data), 50)]
+        trans_bar = st.progress(0)
         preview_box = st.empty()
         
-        final_reviewed_items = []
-        
-        # پیشاندانی ئەوەی پێشتر کراوە
+        final_srt_items = []
         current_preview = ""
-        for k, v in sorted(st.session_state.reviewed_chunks.items()):
-            current_preview += build_srt(v) + "\n\n"
-        if current_preview:
-            preview_box.markdown(f"<div class='live-preview-box'>{current_preview[-1500:].replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
         
-        for i, chunk in enumerate(review_chunks):
-            if i not in st.session_state.reviewed_chunks:
-                res = review_50_lines(chunk, active_keys, st.session_state.master_context, review_status, gemini_model_name)
-                reviewed_chunk = []
-                for item in chunk:
-                    new_item = item.copy()
-                    if res and str(item['id']) in res:
-                        new_item['text'] = res[str(item['id'])]
-                    # دڵنیابوون لەوەی eng_text دەسڕینەوە بۆ فایلی کۆتایی
-                    if 'eng_text' in new_item:
-                        del new_item['eng_text']
-                    reviewed_chunk.append(new_item)
-                st.session_state.reviewed_chunks[i] = reviewed_chunk
-                
-                # سەیڤکردن لە داتابەیس دوای هەر پێداچوونەوەیەک
-                save_state_to_db(db_conn, st.session_state.current_hash, input_srt, st.session_state.master_context, st.session_state.translated_chunks, st.session_state.reviewed_chunks)
+        for i, chunk_50 in enumerate(translate_chunks):
+            if i not in st.session_state.translated_chunks:
+                with st.spinner(f"🐝 شانەی هەنگ هێرش دەکاتە سەر پارچەی {i+1}..."):
+                    res = process_50_lines_in_swarm(chunk_50, flat_enriched_data, active_keys, gemini_model_name)
+                    
+                    # کۆکردنەوەی ئەنجامەکان
+                    temp_chunk = []
+                    for item in chunk_50:
+                        new_item = item.copy()
+                        b_id = str(item['id'])
+                        if res and b_id in res:
+                            new_item['text'] = res[b_id]
+                        else:
+                            # ئەگەر زۆر دەگمەن هەڵەی کرد، پێشنیاری یەکەمی بریکاری ٢ بەکاردێنین
+                            fallback = flat_enriched_data.get(b_id, "")
+                            sug_match = re.search(r'<sug3>(.*?)</sug3>', fallback)
+                            if sug_match: new_item['text'] = sug_match.group(1)
+                        temp_chunk.append(new_item)
+                        
+                    st.session_state.translated_chunks[i] = temp_chunk
+                    save_state_to_db(db_conn, st.session_state.current_hash, input_srt, st.session_state.master_context, st.session_state.enriched_chunks, st.session_state.translated_chunks)
             
-            final_reviewed_items.extend(st.session_state.reviewed_chunks[i])
+            final_srt_items.extend(st.session_state.translated_chunks[i])
             
-            # Live Preview Update
-            current_preview = build_srt(final_reviewed_items)
+            # Live Preview
+            current_preview = build_srt(final_srt_items)
             preview_box.markdown(f"<div class='live-preview-box'>{current_preview[-1500:].replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
-            prog_bar_2.progress((i + 1) / len(review_chunks))
+            trans_bar.progress((i + 1) / len(translate_chunks))
             
-        st.session_state.final_srt = build_srt(final_reviewed_items)
-        st.session_state.is_translating = False
-        review_status.success("🎉 پیرۆزە! بەرهەمەکە ئامادەیە بە کوالێتی ١٠٠٪ سینەمایی.")
+        st.session_state.final_srt = build_srt(final_srt_items)
+        st.session_state.is_running = False
+        st.success(f"🎉 هەموو شتێک بە {int(time.time() - st.session_state.start_time) // 60} خولەک تەواو بوو!")
 
 with tab3:
-    if st.session_state.final_srt:
+    if "final_srt" in st.session_state and st.session_state.final_srt:
         st.balloons()
-        st.download_button("📥 داگرتنی فایلی کۆتایی (پێداچوونەوەکراو - .srt)", st.session_state.final_srt, "Studio_PRO_V13_Ultimate.srt")
-        st.markdown("<h3 style='direction: rtl;'>📝 کۆدی پەسەندکراو</h3>", unsafe_allow_html=True)
-        st.text_area("", st.session_state.final_srt, height=450, label_visibility="collapsed")
-    else:
-        st.info("هێشتا پرۆسەکە تەواو نەبووە...")
+        st.download_button("📥 داگرتنی فایلی تایتان (.srt)", st.session_state.final_srt, "Studio_PRO_V14_Titan.srt")
+        st.text_area("کۆدی پەسەندکراو:", st.session_state.final_srt, height=450)
