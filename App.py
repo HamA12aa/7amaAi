@@ -2,7 +2,7 @@ import streamlit as st
 import google.generativeai as genai
 
 # --- ڕێکخستنی لاپەڕە ---
-st.set_page_config(page_title="وەرگێڕی زیرەکی کوردی Pro", page_icon="🎬", layout="centered")
+st.set_page_config(page_title="وەرگێڕی زیرەکی کوردی Flash", page_icon="🎬", layout="centered")
 
 st.markdown("""
     <style>
@@ -11,16 +11,16 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("سیستەمی وەرگێڕانی فیلم (وەشانی Pro 2.5) 🎬")
-st.write("ئەم وەشانە نوێترین و بەهێزترین مۆدێلی گووگڵ (Gemini 2.5 Pro) بەکاردەهێنێت.")
+st.title("سیستەمی وەرگێڕانی فیلم (وەشانی Flash 2.5) 🎬")
+st.write("ئەم وەشانە مۆدێلی خێرا و بێبەرامبەری گووگڵ (Gemini 2.5 Flash) بەکاردەهێنێت بە ڕێنماییە پێشکەوتووەکان.")
 
 # --- وەرگرتنی کلیل لە لاتەنیشت ---
 api_key = st.sidebar.text_input("🔑 Google API Key لێرە دابنێ:", type="password")
 
 if api_key:
     genai.configure(api_key=api_key)
-    # لێرەدا مۆدێلە نوێیەکەمان داناوە کە بە بێ کێشە کار دەکات
-    model = genai.GenerativeModel('gemini-2.5-pro')
+    # لێرەدا مۆدێلی فلاش بەکاردەهێنین کە بێبەرامبەرە و خێرایە
+    model = genai.GenerativeModel('gemini-2.5-flash')
 
     english_text = st.text_area("📝 دەقی ئینگلیزی لێرە دابنێ:", height=200)
 
