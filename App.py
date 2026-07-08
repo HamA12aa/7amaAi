@@ -8,7 +8,7 @@ import random
 # ==========================================
 # 1. UI SETUP & BEAUTIFUL CSS
 # ==========================================
-st.set_page_config(page_title="AI Movie Director PRO | V6.1", layout="wide", page_icon="🎬")
+st.set_page_config(page_title="AI Movie Director PRO | V6.2", layout="wide", page_icon="🎬")
 
 st.markdown("""
     <style>
@@ -43,11 +43,18 @@ def build_srt(parsed_list):
     return '\n\n'.join([f"{item['id']}\n{item['time']}\n{item['text']}" for item in parsed_list])
 
 def extract_json_from_text(text):
+    """پاککەرەوەیەکی زۆر بەهێز بۆ ئەوەی بە زۆر JSONـەکە دەربهێنێت"""
     try:
-        match = re.search(r'\[.*\]', text, re.DOTALL)
-        if match:
-            return json.loads(match.group(0))
-    except:
+        # لادانی هەموو وشە و ماڕکداونێکی زیادە
+        clean_text = text.replace('```json', '').replace('```', '').strip()
+        # دۆزینەوەی سەرەتا و کۆتایی کەوانەکان
+        start_idx = clean_text.find('[')
+        end_idx = clean_text.rfind(']') + 1
+        
+        if start_idx != -1 and end_idx != -1:
+            json_str = clean_text[start_idx:end_idx]
+            return json.loads(json_str)
+    except Exception as e:
         pass
     return None
 
@@ -62,49 +69,58 @@ def translate_chunk_with_agents(chunk, active_keys, glossary, visual_container, 
     json_input = json.dumps(input_data, ensure_ascii=False, indent=2)
 
     prompt = f"""
-    You are 'AI Movie Director PRO'. Translate the english subtitles to natural cinematic Central Kurdish (Sorani).
+    You are an elite cinematic translator. Translate the English subtitles into natural Central Kurdish (Sorani).
     Glossary: {glossary}
     
-    IMPORTANT: You MUST reply ONLY with a valid JSON array. No extra text.
-    Format exactly like this:
+    You MUST output ONLY a valid JSON array. DO NOT keep the text in English. Translate 'english_text' to Sorani and put it in 'kurdish_text'.
+    
+    Example output:
     [
       {{"id": "1", "kurdish_text": "سڵاو دنیا"}},
-      {{"id": "2", "kurdish_text": "وەرگێڕانەکە لێرە دەبێت"}}
+      {{"id": "2", "kurdish_text": "وەرگێڕانەکە بۆ کوردی"}}
     ]
     
-    Input Subtitles:
+    Input JSON to translate:
     {json_input}
     """
 
     attempts = 0
-    while attempts < len(active_keys) * 2:
+    while attempts < len(active_keys) * 3:  # هەوڵدانی زیاتر (٣ ئەوەندەی کلیلەکان)
         current_key = random.choice(active_keys)
         try:
-            visual_container.markdown(f"<div class='agent-box'>⚙️ [Load Balancer]: Connecting with Key ***{current_key[-4:]} using {selected_model}...</div>", unsafe_allow_html=True)
+            visual_container.markdown(f"<div class='agent-box'>⚙️ [Load Balancer]: Connecting with Key ***{current_key[-4:]}...</div>", unsafe_allow_html=True)
             
             genai.configure(api_key=current_key)
-            model = genai.GenerativeModel(selected_model, generation_config={"temperature": 0.3})
             
-            visual_container.markdown(f"<div class='agent-box'>🧠 [Linguist & Scriptwriter]: Translating...</div>", unsafe_allow_html=True)
+            # ناچارکردنی مۆدێلەکە کە تەنها JSON بداتەوە ئەگەر پشتگیری بکات
+            try:
+                model = genai.GenerativeModel(selected_model, generation_config={"temperature": 0.2, "response_mime_type": "application/json"})
+            except:
+                # ئەگەر وەشانەکەی کۆن بوو، بەبێ ئەو تایبەتمەندییە کاری پێدەکەین
+                model = genai.GenerativeModel(selected_model, generation_config={"temperature": 0.2})
+            
+            visual_container.markdown(f"<div class='agent-box'>🧠 [Linguist]: Translating text to Kurdish Sorani...</div>", unsafe_allow_html=True)
             
             response = model.generate_content(prompt)
             result_json = extract_json_from_text(response.text)
             
             if result_json:
-                visual_container.markdown(f"<div class='agent-box'>✂️ [Editor]: JSON verified. Timestamps preserved!</div>", unsafe_allow_html=True)
+                visual_container.markdown(f"<div class='agent-box'>✂️ [Editor]: Translation successfully formatted and injected!</div>", unsafe_allow_html=True)
                 return result_json
             else:
-                visual_container.warning("⚠️ کێشە لە خوێندنەوەی فۆرماتەکە، دووبارە هەوڵدەداتەوە...")
+                visual_container.warning("⚠️ مۆدێلەکە وەڵامەکەی تێکدا، دووبارە هەوڵدەداتەوە...")
+                time.sleep(1)
         except Exception as e:
             err_str = str(e)
             if "429" in err_str:
                 visual_container.error(f"🔴 Limit 429 Reached! Switching keys...")
                 time.sleep(2)
             elif "404" in err_str:
-                visual_container.error(f"🔴 Error 404: مۆدێلی {selected_model} نەدۆزرایەوە! تکایە لە سایدبارەکە مۆدێلێکی تر هەڵبژێرە.")
-                return None # ڕاستەوخۆ دەوەستێت بۆ ئەوەی بەکارهێنەر مۆدێل بگۆڕێت
+                visual_container.error(f"🔴 Error 404: مۆدێلی {selected_model} نەدۆزرایەوە!")
+                return None 
             else:
                 visual_container.error(f"❌ Error: {err_str[:80]}")
+                time.sleep(1)
         attempts += 1
         
     return None
@@ -112,15 +128,14 @@ def translate_chunk_with_agents(chunk, active_keys, glossary, visual_container, 
 # ==========================================
 # 4. MAIN UI LAYOUT
 # ==========================================
-st.markdown("<h1 class='main-title'>🎬 AI Movie Director PRO (V6.1)</h1>", unsafe_allow_html=True)
-st.markdown("<p class='sub-title'>وەرگێڕانی سینەمایی بە هەماهەنگی ٥ بریکاری زیرەکی دەستکرد</p>", unsafe_allow_html=True)
+st.markdown("<h1 class='main-title'>🎬 AI Movie Director PRO (V6.2)</h1>", unsafe_allow_html=True)
+st.markdown("<p class='sub-title'>وەرگێڕانی سینەمایی - وەشانی دژە-گلیچ و دڵنیاکەرەوە</p>", unsafe_allow_html=True)
 
 with st.sidebar:
     st.header("⚙️ ڕێکخستنەکان")
-    # زیادکردنی هەڵبژاردەی مۆدێل بۆ چارەسەری کێشەی 404
     ai_model = st.selectbox("🤖 مۆدێلی زیرەکی دەستکرد:", 
                             ["gemini-1.5-flash-latest", "gemini-1.5-pro-latest", "gemini-1.5-flash", "gemini-pro"],
-                            index=0, help="ئەگەر هەڵەی 404 ی دا، یەکێکی تر لەمانە هەڵبژێرە.")
+                            index=0)
     
     st.markdown("---")
     st.header("🔑 کلیلی API")
@@ -179,21 +194,24 @@ if getattr(st.session_state, 'is_translating', False):
                 json_result = translate_chunk_with_agents(chunk, active_keys, glossary, st.empty(), ai_model)
                 
                 if json_result:
-                    result_map = {str(item['id']): item.get('kurdish_text', item.get('text', '')) for item in json_result}
+                    # گۆڕینی داتا بە شێوەیەکی سەلامەت
+                    result_map = {str(item.get('id', '')): item.get('kurdish_text', '') for item in json_result}
+                    
                     for item in chunk:
                         new_item = item.copy()
-                        if new_item['id'] in result_map:
-                            new_item['text'] = result_map[new_item['id']]
+                        if str(new_item['id']) in result_map and result_map[str(new_item['id'])]:
+                            new_item['text'] = result_map[str(new_item['id'])]
+                        else:
+                            st.warning(f"⚠️ دێڕی {new_item['id']} وەرنەگێڕدرا، جارێکی تر تاقی دەکەینەوە...")
                         translated_final.append(new_item)
                 else:
-                    st.error(f"⚠️ پڕۆسەکە وەستا. مۆدێلەکەت بگۆڕە یان کلیلەکانت بپشکنە.")
+                    st.error(f"❌ ئەم بەشە شکستی هێنا لە وەرگێڕان. دەقەکە بە ئینگلیزی دەمێنێتەوە.")
                     translated_final.extend(chunk)
-                    break # ڕاگرتنی پڕۆسەکە ئەگەر هەڵەی 404 هەبوو
             
             current_srt = build_srt(translated_final)
             live_preview_box.markdown(f"<div class='kurdish-preview'>{current_srt[-500:].replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
             progress_bar.progress(min((i + chunk_size) / total_blocks, 1.0))
-            time.sleep(1.5)
+            time.sleep(1)
             
         st.session_state.final_srt = build_srt(translated_final)
         st.session_state.is_translating = False
@@ -210,6 +228,6 @@ with tab3:
             st.markdown("### 📝 کۆدی SRT")
             st.text_area("", st.session_state.final_srt, height=400)
         
-        st.download_button("📥 داگرتنی فایلی کۆتایی (.srt)", data=st.session_state.final_srt, file_name="Translated.srt", use_container_width=True)
+        st.download_button("📥 داگرتنی فایلی کۆتایی (.srt)", data=st.session_state.final_srt, file_name="Translated_Kurdish.srt", use_container_width=True)
     else:
         st.info("هێشتا هیچ فایلێک وەرنەگێڕدراوە.")
