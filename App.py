@@ -8,7 +8,7 @@ import random
 # ==========================================
 # 1. UI SETUP & BEAUTIFUL CSS
 # ==========================================
-st.set_page_config(page_title="AI Movie Director PRO | V6.0 Ultimate", layout="wide", page_icon="🎬")
+st.set_page_config(page_title="AI Movie Director PRO | V6.1", layout="wide", page_icon="🎬")
 
 st.markdown("""
     <style>
@@ -43,7 +43,6 @@ def build_srt(parsed_list):
     return '\n\n'.join([f"{item['id']}\n{item['time']}\n{item['text']}" for item in parsed_list])
 
 def extract_json_from_text(text):
-    """بۆ دڵنیابوون لەوەی ئەگەر AI تێکستی زیادەی نووسی، تەنها بەشە JSONـەکە دەربهێنین"""
     try:
         match = re.search(r'\[.*\]', text, re.DOTALL)
         if match:
@@ -55,11 +54,10 @@ def extract_json_from_text(text):
 # ==========================================
 # 3. AGENT LOGIC & LOAD BALANCER
 # ==========================================
-def translate_chunk_with_agents(chunk, active_keys, glossary, visual_container):
+def translate_chunk_with_agents(chunk, active_keys, glossary, visual_container, selected_model):
     if not active_keys:
         raise Exception("کلیلەکان بەتاڵن!")
 
-    # ئامادەکردنی دەقەکە
     input_data = [{"id": item['id'], "english_text": item['text']} for item in chunk]
     json_input = json.dumps(input_data, ensure_ascii=False, indent=2)
 
@@ -67,7 +65,7 @@ def translate_chunk_with_agents(chunk, active_keys, glossary, visual_container):
     You are 'AI Movie Director PRO'. Translate the english subtitles to natural cinematic Central Kurdish (Sorani).
     Glossary: {glossary}
     
-    IMPORTANT: You MUST reply ONLY with a valid JSON array. No extra text, no markdown block quotes.
+    IMPORTANT: You MUST reply ONLY with a valid JSON array. No extra text.
     Format exactly like this:
     [
       {{"id": "1", "kurdish_text": "سڵاو دنیا"}},
@@ -82,30 +80,31 @@ def translate_chunk_with_agents(chunk, active_keys, glossary, visual_container):
     while attempts < len(active_keys) * 2:
         current_key = random.choice(active_keys)
         try:
-            # 👁️ نیشاندانی کاری بریکاری ٤ (Load Balancer)
-            visual_container.markdown(f"<div class='agent-box'>⚙️ [Agent 4 - Load Balancer]: Connecting to slot with key ending in {current_key[-4:]}...</div>", unsafe_allow_html=True)
+            visual_container.markdown(f"<div class='agent-box'>⚙️ [Load Balancer]: Connecting with Key ***{current_key[-4:]} using {selected_model}...</div>", unsafe_allow_html=True)
             
             genai.configure(api_key=current_key)
-            model = genai.GenerativeModel('gemini-1.5-flash', generation_config={"temperature": 0.3}) # تێمپریچەری کەم بۆ وردی
+            model = genai.GenerativeModel(selected_model, generation_config={"temperature": 0.3})
             
-            # 👁️ نیشاندانی کاری بریکاری ١، ٢ و ٥
-            visual_container.markdown(f"<div class='agent-box'>🧠 [Agent 1 & 2 - Linguist/Scriptwriter]: Translating context and adjusting cinematic tone...</div>", unsafe_allow_html=True)
+            visual_container.markdown(f"<div class='agent-box'>🧠 [Linguist & Scriptwriter]: Translating...</div>", unsafe_allow_html=True)
             
             response = model.generate_content(prompt)
             result_json = extract_json_from_text(response.text)
             
             if result_json:
-                # 👁️ نیشاندانی کاری بریکاری ٣
-                visual_container.markdown(f"<div class='agent-box'>✂️ [Agent 3 - Editor]: Verified JSON format and preserved SRT timestamps perfectly.</div>", unsafe_allow_html=True)
+                visual_container.markdown(f"<div class='agent-box'>✂️ [Editor]: JSON verified. Timestamps preserved!</div>", unsafe_allow_html=True)
                 return result_json
             else:
-                visual_container.warning("⚠️ بریکاری سەرنوسەر نەیتوانی فۆرماتەکە بخوێنێتەوە، دووبارە هەوڵدەداتەوە...")
+                visual_container.warning("⚠️ کێشە لە خوێندنەوەی فۆرماتەکە، دووبارە هەوڵدەداتەوە...")
         except Exception as e:
-            if "429" in str(e):
-                visual_container.error(f"🔴 [Agent 4]: Slot Limit Reached (429)! Switching slots...")
+            err_str = str(e)
+            if "429" in err_str:
+                visual_container.error(f"🔴 Limit 429 Reached! Switching keys...")
                 time.sleep(2)
+            elif "404" in err_str:
+                visual_container.error(f"🔴 Error 404: مۆدێلی {selected_model} نەدۆزرایەوە! تکایە لە سایدبارەکە مۆدێلێکی تر هەڵبژێرە.")
+                return None # ڕاستەوخۆ دەوەستێت بۆ ئەوەی بەکارهێنەر مۆدێل بگۆڕێت
             else:
-                visual_container.error(f"❌ Error: {str(e)[:50]}")
+                visual_container.error(f"❌ Error: {err_str[:80]}")
         attempts += 1
         
     return None
@@ -113,32 +112,36 @@ def translate_chunk_with_agents(chunk, active_keys, glossary, visual_container):
 # ==========================================
 # 4. MAIN UI LAYOUT
 # ==========================================
-st.markdown("<h1 class='main-title'>🎬 AI Movie Director PRO (V6 Ultimate)</h1>", unsafe_allow_html=True)
+st.markdown("<h1 class='main-title'>🎬 AI Movie Director PRO (V6.1)</h1>", unsafe_allow_html=True)
 st.markdown("<p class='sub-title'>وەرگێڕانی سینەمایی بە هەماهەنگی ٥ بریکاری زیرەکی دەستکرد</p>", unsafe_allow_html=True)
 
-# سایدبار
 with st.sidebar:
-    st.header("🔑 کلیلی API (Slots)")
+    st.header("⚙️ ڕێکخستنەکان")
+    # زیادکردنی هەڵبژاردەی مۆدێل بۆ چارەسەری کێشەی 404
+    ai_model = st.selectbox("🤖 مۆدێلی زیرەکی دەستکرد:", 
+                            ["gemini-1.5-flash-latest", "gemini-1.5-pro-latest", "gemini-1.5-flash", "gemini-pro"],
+                            index=0, help="ئەگەر هەڵەی 404 ی دا، یەکێکی تر لەمانە هەڵبژێرە.")
+    
+    st.markdown("---")
+    st.header("🔑 کلیلی API")
     api_inputs = [
-        st.text_input("Slot 1 (Gemini)", type="password"),
-        st.text_input("Slot 2 (Gemini)", type="password"),
-        st.text_input("Slot 3 (Gemini)", type="password"),
-        st.text_input("Slot 4 (Gemini)", type="password")
+        st.text_input("Slot 1", type="password"),
+        st.text_input("Slot 2", type="password"),
+        st.text_input("Slot 3", type="password"),
+        st.text_input("Slot 4", type="password")
     ]
     active_keys = [k.strip() for k in api_inputs if k.strip()]
     
     st.markdown("---")
-    glossary = st.text_area("📚 فەرهەنگی ناوەکان", placeholder="Batman -> پیاوی شەمشەمەکوێرە\nJoker -> جۆکەر")
-    st.success(f"ئێستا {len(active_keys)} کلیل چالاکە ✅")
+    glossary = st.text_area("📚 فەرهەنگی ناوەکان", placeholder="Batman -> پیاوی شەمشەمەکوێرە")
+    st.success(f"{len(active_keys)} کلیل چالاکە ✅")
 
-# دابەشکردنی لاپەڕەکە بۆ ٣ تاب (بۆ جوانی و ڕێکوپێکی)
-tab1, tab2, tab3 = st.tabs(["📥 ١. دانانی فایلی SRT", "⚙️ ٢. پڕۆسەی بریکارەکان (Live)", "✅ ٣. پێشبینین و داگرتن"])
+tab1, tab2, tab3 = st.tabs(["📥 ١. دانانی SRT", "⚙️ ٢. پڕۆسە (Live)", "✅ ٣. بینین و داگرتن"])
 
 with tab1:
-    input_srt = st.text_area("کۆدی SRT لێرە دابنێ (Paste):", height=400, placeholder="1\n00:00:01,000 --> 00:00:04,000\nHello World!")
+    input_srt = st.text_area("کۆدی SRT لێرە دابنێ:", height=300)
     start_btn = st.button("🚀 دەستپێکردنی وەرگێڕان", use_container_width=True)
 
-# گۆڕاوەکان (State)
 if "final_srt" not in st.session_state:
     st.session_state.final_srt = ""
 if "is_translating" not in st.session_state:
@@ -146,26 +149,24 @@ if "is_translating" not in st.session_state:
 
 if start_btn:
     if not input_srt:
-        st.error("تکایە سەرەتا دەقی SRT دابنێ لە تابی یەکەم.")
+        st.error("تکایە سەرەتا دەقی SRT دابنێ.")
     elif not active_keys:
-        st.error("تکایە لانی کەم یەک کلیلی API لە سایدبارەکە دابنێ.")
+        st.error("تکایە لانی کەم یەک کلیلی API دابنێ.")
     else:
         st.session_state.is_translating = True
         st.session_state.final_srt = ""
 
-# پڕۆسەی وەرگێڕان
 if getattr(st.session_state, 'is_translating', False):
     with tab2:
         st.info("پڕۆسەی وەرگێڕان دەستی پێکرد، تکایە لێرە مەڕۆ تا تەواو دەبێت...")
         
         parsed_data = parse_srt(input_srt)
         total_blocks = len(parsed_data)
-        chunk_size = 8 # پارچەی بچووک بۆ دڵنیایی 100% کە نەوەستێت
+        chunk_size = 10 
         
         translated_final = []
         progress_bar = st.progress(0)
         
-        # دروستکردنی شوێنی تایبەت بۆ بینینی کاری بریکارەکان
         agent_status_box = st.empty()
         live_preview_box = st.empty()
         
@@ -175,53 +176,40 @@ if getattr(st.session_state, 'is_translating', False):
             with agent_status_box.container():
                 st.markdown(f"**پارچەی {i+1} بۆ {min(i+chunk_size, total_blocks)} لە کۆی {total_blocks}**")
                 
-                # ناردن بۆ مۆدێل
-                json_result = translate_chunk_with_agents(chunk, active_keys, glossary, st.empty())
+                json_result = translate_chunk_with_agents(chunk, active_keys, glossary, st.empty(), ai_model)
                 
                 if json_result:
-                    # تێکەڵکردنەوەی وەرگێڕانەکە لەگەڵ کاتەکان
-                    result_map = {str(item['id']): item['kurdish_text'] for item in json_result if 'id' in item and 'kurdish_text' in item}
-                    
+                    result_map = {str(item['id']): item.get('kurdish_text', item.get('text', '')) for item in json_result}
                     for item in chunk:
                         new_item = item.copy()
                         if new_item['id'] in result_map:
                             new_item['text'] = result_map[new_item['id']]
                         translated_final.append(new_item)
                 else:
-                    st.error(f"⚠️ کێشە لە وەرگێڕانی ئەم بەشەدا هەبوو، دەقە ئینگلیزییەکە وەک خۆی هێڵرایەوە.")
+                    st.error(f"⚠️ پڕۆسەکە وەستا. مۆدێلەکەت بگۆڕە یان کلیلەکانت بپشکنە.")
                     translated_final.extend(chunk)
+                    break # ڕاگرتنی پڕۆسەکە ئەگەر هەڵەی 404 هەبوو
             
-            # نوێکردنەوەی پێشاندانی ڕاستەوخۆ (Live Preview)
             current_srt = build_srt(translated_final)
             live_preview_box.markdown(f"<div class='kurdish-preview'>{current_srt[-500:].replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
-            
             progress_bar.progress(min((i + chunk_size) / total_blocks, 1.0))
-            time.sleep(1) # پشووی بچووک
+            time.sleep(1.5)
             
         st.session_state.final_srt = build_srt(translated_final)
         st.session_state.is_translating = False
-        st.success("✅ وەرگێڕان بەتەواوی کۆتایی هات! بڕۆ بۆ تابی سێیەم (٣. پێشبینین و داگرتن).")
+        st.success("✅ وەرگێڕان کۆتایی هات! بڕۆ بۆ تابی سێیەم.")
 
-# بینینی کۆتایی و داگرتن
 with tab3:
     if st.session_state.final_srt:
         st.balloons()
-        st.success("بەرهەمەکە ئامادەیە بۆ بینین و داگرتن!")
-        
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("### 👁️ پێشبینینی کوردی (Preview)")
+            st.markdown("### 👁️ پێشبینینی کوردی")
             st.markdown(f"<div class='kurdish-preview' style='height: 400px; overflow-y: auto;'>{st.session_state.final_srt.replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
-        
         with col2:
             st.markdown("### 📝 کۆدی SRT")
             st.text_area("", st.session_state.final_srt, height=400)
         
-        st.download_button(
-            label="📥 داگرتنی فایلی کۆتایی (.srt)", 
-            data=st.session_state.final_srt, 
-            file_name="Hollywood_Translated.srt",
-            use_container_width=True
-        )
+        st.download_button("📥 داگرتنی فایلی کۆتایی (.srt)", data=st.session_state.final_srt, file_name="Translated.srt", use_container_width=True)
     else:
-        st.info("هێشتا هیچ فایلێک وەرنەگێڕدراوە. لە تابی یەکەمەوە دەست پێ بکە.")
+        st.info("هێشتا هیچ فایلێک وەرنەگێڕدراوە.")
