@@ -4,7 +4,7 @@ import google.generativeai as genai
 # --- ڕێکخستنی لاپەڕە ---
 st.set_page_config(page_title="وەرگێڕی زیرەکی کوردی", page_icon="🎬", layout="centered")
 
-# --- چاککردنی دیزاین (ڕاستکردنەوەی هەڵەکە بۆ unsafe_allow_html) ---
+# --- چاککردنی دیزاین ---
 st.markdown("""
     <style>
     .stTextArea textarea { text-align: right; direction: rtl; }
@@ -13,16 +13,16 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.title("سیستەمی ٤-قۆناغی بۆ وەرگێڕانی فیلم 🎬")
-st.write("بەهێزترین سیستەم بە بەکارهێنانی Gemini 1.5 Flash بۆ وەرگێڕانی دروست و سروشتی.")
+st.write("بەهێزترین سیستەم بە بەکارهێنانی نوێترین مۆدێلی Gemini بۆ وەرگێڕانی دروست و سروشتی.")
 
 # --- وەرگرتنی کلیل لە لاتەنیشت ---
 api_key = st.sidebar.text_input("🔑 Google API Key لێرە دابنێ:", type="password")
 st.sidebar.markdown("بۆ بەدەستهێنانی کلیل بڕۆ بۆ [Google AI Studio](https://aistudio.google.com/)")
 
 if api_key:
-    # چالاککردنی زیرەکی دەستکرد
+    # چالاککردنی زیرەکی دەستکرد بە مۆدێلە نوێیەکەی گووگڵ کە کار دەکات
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash')
 
     # وەرگرتنی دەق
     english_text = st.text_area("📝 دەقی ئینگلیزی (SRT یان گفتوگۆ) لێرە دابنێ:", height=200)
