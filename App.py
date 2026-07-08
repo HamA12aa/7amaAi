@@ -10,10 +10,10 @@ import hashlib
 import concurrent.futures
 
 # ==========================================
-# 0. DATABASE MANAGER (V14 - TITAN EDITION)
+# 0. DATABASE MANAGER (V15 - TITAN EDITION)
 # ==========================================
 def init_db():
-    conn = sqlite3.connect('studio_pro_v14.db', check_same_thread=False)
+    conn = sqlite3.connect('studio_pro_v15.db', check_same_thread=False)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS projects
                  (srt_hash TEXT PRIMARY KEY, 
@@ -51,9 +51,9 @@ def load_state_from_db(conn, srt_hash):
 db_conn = init_db()
 
 # ==========================================
-# 1. UI & CSS (10X BETTER)
+# 1. UI & CSS (10X BETTER & METRICS ADDED)
 # ==========================================
-st.set_page_config(page_title="AI Movie Studio PRO | V14 Titan", layout="wide", page_icon="🎬")
+st.set_page_config(page_title="AI Movie Studio PRO | V15 Titan", layout="wide", page_icon="🎬")
 
 st.markdown("""
     <style>
@@ -75,11 +75,31 @@ st.markdown("""
     .stButton>button:hover { transform: scale(1.02); box-shadow: 0 10px 30px rgba(255, 0, 85, 0.4); }
     
     .agent-badge { display: inline-block; padding: 5px 12px; border-radius: 20px; font-size: 0.85em; font-weight: bold; margin-bottom: 10px; background: #222; color: #00ffcc; border: 1px solid #00ffcc;}
+    
+    /* Metrics Styling */
+    [data-testid="stMetricValue"] { font-size: 1.8rem !important; color: #00ffcc !important; }
     </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. SRT PARSER & BUILDER (Untouched Timelines)
+# 2. SESSION STATE INITIALIZATION (BUG FIX)
+# ئەم بەشە ئەو کێشەیە چارەسەر دەکات کە پێشتر دەیگوت is_running بوونی نییە
+# ==========================================
+state_defaults = {
+    "current_hash": "",
+    "master_context": "",
+    "enriched_chunks": {},
+    "translated_chunks": {},
+    "is_running": False,
+    "start_time": 0,
+    "final_srt": ""
+}
+for key, default_val in state_defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = default_val
+
+# ==========================================
+# 3. SRT PARSER & BUILDER (Untouched Timelines)
 # ==========================================
 def parse_srt(srt_string):
     srt_string = srt_string.replace('\r\n', '\n').strip()
@@ -95,7 +115,7 @@ def build_srt(parsed_list):
     return '\n\n'.join([f"{item['id']}\n{item['time']}\n{item['text']}" for item in parsed_list])
 
 # ==========================================
-# 3. AGENT 1: STORY & VIDEO ANALYST
+# 4. AGENT 1: STORY & VIDEO ANALYST
 # ==========================================
 def agent_1_analyze(active_keys, model_name, srt_text, glossary, video_file=None):
     prompt = f"""You are AGENT 1: The Master Anime Director.
@@ -127,10 +147,9 @@ Subtitles: {srt_text[:10000]}"""
     return "Basic Context: Translate dynamically."
 
 # ==========================================
-# 4. AGENT 2: THE ENRICHER (Fix English + Add Japanese + Suggestions)
+# 5. AGENT 2: THE ENRICHER
 # ==========================================
 def agent_2_enrich_chunk(chunk, active_keys, master_context, selected_model):
-    # ناردنی پارچەی بچووک بۆ ئەوەی هەرگیز هەڵە نەکات
     xml_input = "".join([f'<sub id="{item["id"]}">{item["text"].replace("<","").replace(">","")}</sub>\n' for item in chunk])
     
     prompt = f"""You are AGENT 2: The Deep Context Enricher.
@@ -163,7 +182,6 @@ Output EXACTLY like this for every line, do not miss any ID:
             model = genai.GenerativeModel(selected_model, generation_config={"temperature": 0.3})
             res = model.generate_content(prompt).text.replace('```xml', '').replace('```', '').strip()
             
-            # دەرهێنانی داتا زەبەلاحەکە
             enriched_data = {}
             blocks = re.findall(r'<sub id="(\d+)"\s*>(.*?)</sub>', res, re.DOTALL)
             for b_id, content in blocks:
@@ -174,10 +192,9 @@ Output EXACTLY like this for every line, do not miss any ID:
     return None
 
 # ==========================================
-# 5. AGENT 3: THE SWARM TRANSLATOR (10 LINES AT A TIME)
+# 6. AGENT 3: THE SWARM TRANSLATOR (DYNAMIC SETTINGS ADDED)
 # ==========================================
-def swarm_worker_translate(chunk_10, enriched_data_map, key, selected_model):
-    # ئەمە ئەو بریکارەیە کە لەناو شانەی هەنگەکەدا تەنها ١٠ دێڕ دەکات
+def swarm_worker_translate(chunk_10, enriched_data_map, key, selected_model, split_limit, temp):
     input_text = ""
     for item in chunk_10:
         b_id = str(item['id'])
@@ -189,7 +206,7 @@ You have 10 lines. Look at the <fixed_eng>, <jp_guess>, and the 3 Kurdish sugges
 Your ONLY job is to output the final, perfect, cinematic Kurdish Sorani translation.
 Rule 1: NEVER SHORTEN THE TEXT.
 Rule 2: DO NOT MISS ANY ID.
-Rule 3: If text is >45 chars, split with \n.
+Rule 3: If text is >{split_limit} chars, split with \\n.
 
 Input:
 {input_text}
@@ -199,24 +216,23 @@ Output ONLY this XML format:
 """
     try:
         genai.configure(api_key=key)
-        model = genai.GenerativeModel(selected_model, generation_config={"temperature": 0.1})
+        # Using dynamic temperature from advanced settings
+        model = genai.GenerativeModel(selected_model, generation_config={"temperature": temp})
         res = model.generate_content(prompt).text.replace('```xml', '').replace('```', '').strip()
         matches = re.findall(r'<sub id="(\d+)"\s*>(.*?)</sub>', res, re.DOTALL)
         if matches: return {m[0].strip(): m[1].strip() for m in matches}
     except: pass
     return None
 
-def process_50_lines_in_swarm(chunk_50, enriched_data_map, keys, selected_model):
-    # دابەشکردنی ٥٠ دێڕەکە بۆ ٥ پارچەی ١٠ دێڕی
+def process_50_lines_in_swarm(chunk_50, enriched_data_map, keys, selected_model, split_limit, temp):
     chunks_10 = [chunk_50[i:i+10] for i in range(0, len(chunk_50), 10)]
     final_results = {}
     
-    # لێرەدا فێڵە گەورەکەیە: هەر ١٠ دێڕێک بە بەکارهێنانی کلیلێکی جیاواز لە یەک کاتدا (Parallel) دەڕوات
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(keys)) as executor:
         futures = []
         for i, c10 in enumerate(chunks_10):
             k = keys[i % len(keys)]
-            futures.append(executor.submit(swarm_worker_translate, c10, enriched_data_map, k, selected_model))
+            futures.append(executor.submit(swarm_worker_translate, c10, enriched_data_map, k, selected_model, split_limit, temp))
             
         for future in concurrent.futures.as_completed(futures):
             res = future.result()
@@ -225,17 +241,10 @@ def process_50_lines_in_swarm(chunk_50, enriched_data_map, keys, selected_model)
     return final_results
 
 # ==========================================
-# 6. MAIN UI & INITIALIZATION
+# 7. MAIN UI & SIDEBAR (WITH ADVANCED FEATURES)
 # ==========================================
-st.markdown("<h1 class='main-title'>AI Movie Studio PRO 🎬 V14 TITAN</h1>", unsafe_allow_html=True)
+st.markdown("<h1 class='main-title'>AI Movie Studio PRO 🎬 V15 TITAN</h1>", unsafe_allow_html=True)
 st.markdown("<p class='sub-title'>سیستەمی شانەی هەنگ (Swarm AI) | شیکاری ژاپۆنی | خێرایی خەیاڵی</p>", unsafe_allow_html=True)
-
-if "current_hash" not in st.session_state:
-    st.session_state.current_hash = ""
-    st.session_state.master_context = ""
-    st.session_state.enriched_chunks = {}
-    st.session_state.translated_chunks = {}
-    st.session_state.is_running = False
 
 with st.sidebar:
     st.header("🔑 کلیلەکان (Swarm Engine)")
@@ -248,16 +257,41 @@ with st.sidebar:
         try:
             genai.configure(api_key=active_keys[0])
             available_models = [m.name.replace('models/', '') for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-            if available_models: gemini_model_name = st.selectbox("مۆدێل:", available_models)
+            if available_models: gemini_model_name = st.selectbox("🤖 مۆدێل:", available_models)
         except: st.error("⚠️ کێشەی کلیل.")
             
     st.markdown("---")
     glossary = st.text_area("📚 فەرهەنگ", placeholder="وشەکان...")
     uploaded_video = st.file_uploader("🎥 ڤیدیۆ", type=['mp4'])
 
+    # --- ADVANCED SETTINGS (NEW FEATURES) ---
+    st.markdown("---")
+    st.header("⚙️ ڕێکخستنە پێشکەوتووەکان")
+    swarm_temp = st.slider("🌡️ هەستیاری وەرگێڕان (AI Temp)", min_value=0.0, max_value=1.0, value=0.1, step=0.05, help="ژمارەی کەمتر واتە وەرگێڕانێکی ڕاستەقینەتر، ژمارەی بەرزتر واتە وشەی فەنتازیا و دەوڵەمەندتر.")
+    split_limit = st.number_input("✂️ شکاندنی دێڕ (پیت)", min_value=30, max_value=80, value=45, help="ئەگەر ڕستەیەک لەم ژمارەیە زیاتر بوو، دابەش دەبێت بۆ دوو دێڕ.")
+    
+    st.markdown("---")
+    if st.button("🗑️ سڕینەوەی داتابەیس"):
+        c = db_conn.cursor()
+        c.execute("DELETE FROM projects")
+        db_conn.commit()
+        for key in state_defaults.keys():
+            if key in st.session_state:
+                del st.session_state[key]
+        st.success("✅ داتابەیس بەتەواوی سڕایەوە! پەڕەکە ڕیفرێش بکە.")
+
 tab1, tab2, tab3 = st.tabs(["📥 ١. پڕۆژە", "⚙️ ٢. ستۆدیۆی ئەلیکترۆنی", "✅ ٣. بەرهەم"])
 
 with tab1:
+    # --- UI DASHBOARD (NEW FEATURE) ---
+    st.markdown("### 📊 زانیارییەکانی سیستەم")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("🔑 کلیلە چالاکەکان", f"{len(active_keys)}/4")
+    c2.metric("⚡ خێرایی چاوەڕوانکراو", "١٠ دێڕ/چرکە" if len(active_keys) > 1 else "ئاسایی")
+    c3.metric("🧠 بریکارەکان", "٣ بریکاری چالاک")
+    c4.metric("🗄️ دۆخی دۆکیومێنت", "پارێزراو بە DB")
+    st.markdown("<hr>", unsafe_allow_html=True)
+    
     input_srt = st.text_area("دەقی SRT لێرە دابنێ (٤٠٠ دێڕ بە ٥ خولەک!):", height=300)
     if st.button("🚀 وەرگێڕانی تایتان دەستپێبکە"):
         if input_srt and active_keys:
@@ -277,11 +311,10 @@ with tab1:
             st.session_state.start_time = time.time()
 
 # ==========================================
-# 7. THE TITAN ENGINE (PIPELINE)
+# 8. THE TITAN ENGINE (PIPELINE)
 # ==========================================
 if st.session_state.is_running:
     with tab2:
-        # Time Tracker
         elapsed = int(time.time() - st.session_state.start_time)
         st.markdown(f"⏱️ **کاتی تێپەڕبوو:** {elapsed // 60} خولەک و {elapsed % 60} چرکە")
 
@@ -298,7 +331,7 @@ if st.session_state.is_running:
         
         # --- AGENT 2 (ENRICHER) ---
         st.markdown("### 🧠 قۆناغی دروستکردنی Blueprint (ئینگلیزی، ژاپۆنی، پێشنیار)")
-        enrich_chunks = [parsed_data[i:i+20] for i in range(0, len(parsed_data), 20)] # ٢٠ دێڕ بە ٢٠ دێڕ بۆ دڵنیایی
+        enrich_chunks = [parsed_data[i:i+20] for i in range(0, len(parsed_data), 20)] 
         enrich_bar = st.progress(0)
         
         flat_enriched_data = {}
@@ -329,9 +362,9 @@ if st.session_state.is_running:
         for i, chunk_50 in enumerate(translate_chunks):
             if i not in st.session_state.translated_chunks:
                 with st.spinner(f"🐝 شانەی هەنگ هێرش دەکاتە سەر پارچەی {i+1}..."):
-                    res = process_50_lines_in_swarm(chunk_50, flat_enriched_data, active_keys, gemini_model_name)
+                    # تێپەڕاندنی ڕێکخستنە نوێیەکان لە سایدبارەوە بۆ بریکارەکە
+                    res = process_50_lines_in_swarm(chunk_50, flat_enriched_data, active_keys, gemini_model_name, split_limit, swarm_temp)
                     
-                    # کۆکردنەوەی ئەنجامەکان
                     temp_chunk = []
                     for item in chunk_50:
                         new_item = item.copy()
@@ -339,7 +372,6 @@ if st.session_state.is_running:
                         if res and b_id in res:
                             new_item['text'] = res[b_id]
                         else:
-                            # ئەگەر زۆر دەگمەن هەڵەی کرد، پێشنیاری یەکەمی بریکاری ٢ بەکاردێنین
                             fallback = flat_enriched_data.get(b_id, "")
                             sug_match = re.search(r'<sug3>(.*?)</sug3>', fallback)
                             if sug_match: new_item['text'] = sug_match.group(1)
@@ -350,7 +382,6 @@ if st.session_state.is_running:
             
             final_srt_items.extend(st.session_state.translated_chunks[i])
             
-            # Live Preview
             current_preview = build_srt(final_srt_items)
             preview_box.markdown(f"<div class='live-preview-box'>{current_preview[-1500:].replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
             trans_bar.progress((i + 1) / len(translate_chunks))
@@ -362,5 +393,10 @@ if st.session_state.is_running:
 with tab3:
     if "final_srt" in st.session_state and st.session_state.final_srt:
         st.balloons()
-        st.download_button("📥 داگرتنی فایلی تایتان (.srt)", st.session_state.final_srt, "Studio_PRO_V14_Titan.srt")
+        col1, col2 = st.columns(2)
+        # خەسڵەتی نوێ: داگرتن بە دوو فۆرماتی جیاواز
+        with col1:
+            st.download_button("📥 داگرتنی فایلی تایتان (.srt)", st.session_state.final_srt, "Studio_PRO_V15_Titan.srt")
+        with col2:
+            st.download_button("📝 داگرتنی وەک دەقی سادە (.txt)", st.session_state.final_srt.replace('-->', '>>'), "Studio_PRO_Text.txt")
         st.text_area("کۆدی پەسەندکراو:", st.session_state.final_srt, height=450)
