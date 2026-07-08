@@ -1,131 +1,70 @@
 import streamlit as st
 import google.generativeai as genai
 from groq import Groq
+import tempfile
+import time
 
-# --- 1. ڕێکخستنی لاپەڕە ---
-st.set_page_config(page_title="AI Subtitle Pro 5", layout="wide", page_icon="🎬")
+# --- دیزاین ---
+st.set_page_config(page_title="AI Video Translator FREE", layout="wide")
+st.markdown("<style>textarea { direction: ltr; text-align: left; background: #111; color: #0f9; }</style>", unsafe_allow_html=True)
 
-# --- 2. چارەسەری دیزاین (CSS) ---
-st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700&display=swap');
-    
-    html, body, [data-testid="stSidebar"], .stMarkdown {
-        font-family: 'Vazirmatn', sans-serif;
-    }
-
-    .stTextArea textarea {
-        direction: ltr !important;
-        text-align: left !important;
-        font-family: monospace !important;
-        background-color: #0e1117 !important;
-        color: #00ffcc !important;
-    }
-
-    .stButton>button {
-        width: 100%;
-        border-radius: 8px;
-        height: 3em;
-        background-color: #ff4b4b;
-        color: white;
-        font-weight: bold;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- 3. سایدبار و دۆزینەوەی مۆدێلەکان (ئۆتۆماتیکی) ---
+# --- سایدبار بۆ کلیلەکان ---
 with st.sidebar:
-    st.title("🛠️ ڕێکخستنی سیستم")
-    gemini_key = st.text_input("🔑 Google API Key:", type="password")
-    groq_key = st.text_input("🔑 Groq API Key:", type="password")
-    
-    st.markdown("---")
-    gemini_model_name = None
-    
-    # *** گەڕانی ئۆتۆماتیکی بەدوای مۆدێلە کارپێکراوەکان ***
-    if gemini_key:
-        try:
-            genai.configure(api_key=gemini_key)
-            available_models = []
-            # پرسیار لە گووگڵ دەکات بزانێت چ مۆدێلێک بەردەستە
-            for m in genai.list_models():
-                if 'generateContent' in m.supported_generation_methods:
-                    # ناوی مۆدێلەکە خاوێن دەکاتەوە و دەیخاتە لیستەوە
-                    available_models.append(m.name.replace('models/', ''))
-            
-            if available_models:
-                gemini_model_name = st.selectbox("🤖 مۆدێلەکانی گووگڵ (کارپێکراو):", available_models)
-        except Exception as e:
-            st.error("⚠️ کلیلەکەت کێشەی هەیە یان ئینتەرنێت بڕاوە.")
-    else:
-        st.info("سەرەتا کلیلی گووگڵ دابنێ بۆ بینینی مۆدێلەکان.")
-        
-    genre = st.selectbox("🎭 جۆری وەرگێڕان:", ["ئەنیمێ", "ئاکشن", "دراما", "کۆمیدی"])
+    st.title("🔑 سێرڤەرە بەلاشەکان")
+    gemini_key = st.text_input("Google API Key:", type="password")
+    groq_key = st.text_input("Groq API Key:", type="password")
+    video_file = st.file_uploader("🎬 ڤیدیۆی کورت باربکە:", type=["mp4", "mov", "avi"])
 
-# --- 4. ناوەڕۆکی سەرەکی ---
-st.markdown("<h2 style='text-align: center; direction: rtl;'>🎬 وەرگێڕی زیرەکی ٥-ئەفسەری</h2>", unsafe_allow_html=True)
+st.title("🎬 وەرگێڕی ٥-ئەفسەری (بینەری ڤیدیۆ - بەلاش)")
 
-col1, col2 = st.columns(2)
+input_srt = st.text_area("📥 دەقی ئینگلیزی (SRT) لێرە دابنێ:", height=200)
 
-with col1:
-    st.markdown("<h3 style='direction: rtl;'>📥 ئینگلیزی (SRT)</h3>", unsafe_allow_html=True)
-    input_text = st.text_area("دەقەکە لێرە دابنێ", height=400, label_visibility="collapsed")
-
-with col2:
-    st.markdown("<h3 style='direction: rtl;'>📤 وەرگێڕانی کوردی</h3>", unsafe_allow_html=True)
-    output_placeholder = st.empty()
-    output_placeholder.info("چاوەڕێی دەستپێکردنم...")
-
-# --- 5. لۆژیکی کارکردن ---
-if st.button("🚀 دەستپێکردنی پرۆسەی وەرگێڕان"):
-    if not gemini_key or not groq_key:
-        st.error("⚠️ تکایە هەردوو کلیلەکە لە سایدبار داخڵ بکە.")
-    elif not gemini_model_name:
-        st.error("⚠️ هیچ مۆدێلێکی گووگڵ نەدۆزرایەوە.")
-    elif not input_text:
-        st.warning("⚠️ دەقێکی ئینگلیزی دابنێ.")
+if st.button("🚀 دەستپێکردنی پرۆسەی ژێربینین"):
+    if not gemini_key or not groq_key or not input_srt:
+        st.error("تکایە کلیلەکان و دەقەکە پڕ بکەرەوە.")
     else:
         try:
-            # ڕێکخستنی Gemini لەگەڵ ئەو مۆدێلەی لە لیستەکە هەڵبژێردراوە
             genai.configure(api_key=gemini_key)
-            model_gemini = genai.GenerativeModel(gemini_model_name)
+            gem_model = genai.GenerativeModel('gemini-1.5-flash')
+            groq_client = Groq(api_key=groq_key)
+
+            # بریکاری ١ و ٢ (Gemini): وەرگێڕان و کلتوور
+            with st.status("🕵️ بریکاری ١ و ٢: وەرگێڕان...") as s:
+                t1 = gem_model.generate_content(f"Translate to natural Kurdish: {input_srt}").text
+                s.update(label="وەرگێڕان تەواو بوو", state="complete")
+
+            # بریکاری ٣ و ٤ (Groq - Llama): ڕێزمان و فۆرمات
+            with st.status("✍️ بریکاری ٣ و ٤: ڕێزمان و SRT...") as s:
+                res = groq_client.chat.completions.create(
+                    model="llama-3.3-70b-specdec",
+                    messages=[{"role": "user", "content": f"Fix Kurdish grammar and SRT format: {t1}"}]
+                )
+                t3 = res.choices[0].message.content
+                s.update(label="ڕێزمان ڕێکخرا", state="complete")
+
+            # بریکاری ٥ (Gemini - Video Observer): پێداچوونەوە بە ڤیدیۆ
+            if video_file:
+                with st.status("👁️ بریکاری ٥: سەیری ڤیدیۆ دەکات و دەقەکە ڕادەگرێت...") as s:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
+                        tmp.write(video_file.read())
+                        video_path = tmp.name
+                    
+                    # بارکردنی ڤیدیۆ بۆ سێرڤەری گووگڵ (بەلاش)
+                    g_file = genai.upload_file(path=video_path)
+                    while g_file.state.name == "PROCESSING":
+                        time.sleep(2)
+                        g_file = genai.get_file(g_file.name)
+                    
+                    # شیکردنەوەی کۆتایی بەپێی دیمەن
+                    response = gem_model.generate_content([g_file, f"Watch this and fix this Kurdish SRT based on character emotions and lip-sync: {t3}"])
+                    final_srt = response.text
+                    s.update(label="پێداچوونەوەی ڤیدیۆ کۆتایی هات", state="complete")
+            else:
+                final_srt = t3
+                st.warning("ڤیدیۆ نییە، تەنها بە دەق پێداچوونەوە کرا.")
+
+            st.subheader("🎯 ئەنجامی کۆتایی:")
+            st.code(final_srt, language="srt")
             
-            # ڕێکخستنی Groq
-            client_groq = Groq(api_key=groq_key)
-
-            with st.status("🕵️ بریکاری ١: خەریکی وەرگێڕانە...") as s:
-                r1 = model_gemini.generate_content(f"Translate this SRT to Kurdish Sorani: {input_text}")
-                t1 = r1.text
-                s.update(label="قۆناغی ١ تەواو", state="complete")
-
-            with st.status("🎭 بریکاری ٢: ڕێکخستنی شێوازی قسەکردن...") as s:
-                r2 = model_gemini.generate_content(f"Make this Kurdish text sound like natural {genre} dialogue: {t1}")
-                t2 = r2.text
-                s.update(label="قۆناغی ٢ تەواو", state="complete")
-
-            with st.status("✍️ بریکاری ٣: ڕێزمانی کوردی (Llama)...") as s:
-                r3 = client_groq.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    messages=[{"role": "user", "content": f"Fix the Kurdish grammar: {t2}"}]
-                )
-                t3 = r3.choices[0].message.content
-                s.update(label="قۆناغی ٣ تەواو", state="complete")
-
-            with st.status("📏 بریکاری ٤: فۆرماتکردنی ژێرنووس...") as s:
-                r4 = client_groq.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    messages=[{"role": "user", "content": f"Keep SRT format exactly the same, keep numbers perfectly matched, and shorten text: {t3}"}]
-                )
-                t4 = r4.choices[0].message.content
-                s.update(label="قۆناغی ٤ تەواو", state="complete")
-
-            with st.status("🎬 بریکاری ٥: پیاچوونەوەی دەرهێنەر...") as s:
-                r5 = model_gemini.generate_content(f"Final check. Output ONLY the perfect Kurdish SRT without any conversation: {t4}")
-                final_result = r5.text
-                s.update(label="هەموو قۆناغەکان تەواو بوون!", state="complete")
-
-            output_placeholder.code(final_result, language="srt")
-            st.balloons()
-
         except Exception as e:
-            st.error(f"❌ هەڵەیەک ڕوویدا: {str(e)}")
+            st.error(f"هەڵەیەک ڕوویدا: {e}")
