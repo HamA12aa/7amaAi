@@ -13,7 +13,6 @@ import math
 
 # ==========================================
 # 0. ABSOLUTE TOP: SESSION STATE FIX
-# مەحاڵە لێرە بەدواوە هەڵەی AttributeError بدات
 # ==========================================
 if "is_running" not in st.session_state: st.session_state.is_running = False
 if "current_hash" not in st.session_state: st.session_state.current_hash = ""
@@ -25,10 +24,10 @@ if "final_srt" not in st.session_state: st.session_state.final_srt = ""
 if "console_logs" not in st.session_state: st.session_state.console_logs = []
 
 # ==========================================
-# 1. DATABASE MANAGER (V17)
+# 1. DATABASE MANAGER (V18)
 # ==========================================
 def init_db():
-    conn = sqlite3.connect('studio_pro_v17.db', check_same_thread=False)
+    conn = sqlite3.connect('studio_pro_v18.db', check_same_thread=False)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS projects
                  (srt_hash TEXT PRIMARY KEY, 
@@ -68,7 +67,7 @@ db_conn = init_db()
 # ==========================================
 # 2. UI & CSS
 # ==========================================
-st.set_page_config(page_title="AI Movie Studio PRO | V17 Grandmaster", layout="wide", page_icon="🎬")
+st.set_page_config(page_title="AI Movie Studio PRO | V18", layout="wide", page_icon="🎬")
 
 st.markdown("""
     <style>
@@ -105,16 +104,14 @@ def build_srt(parsed_list):
 
 def log_to_console(message, color="lime"):
     st.session_state.console_logs.append(f"<span style='color:{color};'>> {message}</span><br>")
-    # هێشتنەوەی تەنها ٥٠ هێڵی کۆتایی بۆ ئەوەی قورس نەبێت
     if len(st.session_state.console_logs) > 50: st.session_state.console_logs.pop(0)
 
 def generate_content_rest(prompt, api_key, model_name, temp=0.2):
-    """بەکارهێنانی REST API بۆ ڕێگریکردن لە پێکدادانی کلیلەکان لە یەک کاتدا"""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
     headers = {'Content-Type': 'application/json'}
     data = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": temp}}
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=60) # زیادکردنی کات بۆ ٦٠ چرکە بۆ زانیاری قووڵ
+        response = requests.post(url, headers=headers, json=data, timeout=60) 
         if response.status_code == 200:
             return response.json()['candidates'][0]['content']['parts'][0]['text']
         else:
@@ -123,7 +120,7 @@ def generate_content_rest(prompt, api_key, model_name, temp=0.2):
         return f"ERROR_TIMEOUT: {str(e)}"
 
 # ==========================================
-# 4. AGENTS DEFINITION (POWERED UP)
+# 4. AGENTS DEFINITION
 # ==========================================
 def agent_1_analyze(active_keys, model_name, srt_text, glossary, video_file=None):
     prompt = f"""You are AGENT 1: The Master Anime Director. Create a deeply detailed Translation Bible.
@@ -136,7 +133,6 @@ Subtitles: {srt_text[:12000]}"""
     return "Basic Context: Maintain high cinematic quality."
 
 def agent_2_enrich(chunk, key, master_context, model_name):
-    # بریکاری ٢ کە داوات کرد زانیارییەکانی زۆر بێت و پێشنیار بکات
     xml_input = "".join([f'<sub id="{item["id"]}">{item["text"].replace("<","").replace(">","")}</sub>\n' for item in chunk])
     prompt = f"""You are AGENT 2 (The Blueprint Master). Context: {master_context}
 
@@ -166,7 +162,6 @@ Input:
     return data
 
 def agent_3_translate(chunk, enriched_map, key, model_name, split_limit, temp):
-    # بریکاری ٣ کە تەنها پێداچوونەوە و هەڵبژاردنی باشترین دەکات
     input_text = ""
     for item in chunk:
         b_id = str(item['id'])
@@ -196,27 +191,26 @@ Output format ONLY:
     if matches: return {m[0].strip(): m[1].strip() for m in matches}
     return None
 
-def process_swarm_pipeline(chunk_15, key1, key2, model_name, split_limit, temp):
-    # هەنگاوی 1: بریکاری 2 (دەوڵەمەندکردن)
-    enriched = agent_2_enrich(chunk_15, key1, st.session_state.master_context, model_name)
+# چارەسەری کێشە گەورەکە لێرەدایە: وەرگرتنی master_context وەک parameter نەک لەناو session_state
+def process_swarm_pipeline(chunk_15, key1, key2, model_name, split_limit, temp, master_context):
+    enriched = agent_2_enrich(chunk_15, key1, master_context, model_name)
     if not enriched:
         return None, {}, f"⚠️ بریکاری ٢ شکستی هێنا بۆ پارچەی {chunk_15[0]['id']}"
     
     sample_jp = re.search(r'<jp_guess>(.*?)</jp_guess>', list(enriched.values())[0])
     jp_txt = sample_jp.group(1) if sample_jp else "N/A"
 
-    # هەنگاوی 2: بریکاری 3 (وەرگێڕانی کۆتایی)
     final_res = agent_3_translate(chunk_15, enriched, key2, model_name, split_limit, temp)
     if not final_res:
         return None, enriched, f"⚠️ بریکاری ٣ شکستی هێنا. بەکارهێنانی پێشنیاری بریکاری ٢."
         
     sample_final = list(final_res.values())[0]
-    return final_res, enriched, f"🧠 ژاپۆنی: {jp_txt} | ✅ وەرگێڕا: {sample_final}"
+    return final_res, enriched, f"🧠 ژاپۆنی: {jp_txt} | ✅ وەرگێڕا: {sample_final[:30]}..."
 
 # ==========================================
 # 5. MAIN UI & SIDEBAR
 # ==========================================
-st.markdown("<h1 class='main-title'>AI Movie Studio PRO 🎬 V17</h1>", unsafe_allow_html=True)
+st.markdown("<h1 class='main-title'>AI Movie Studio PRO 🎬 V18</h1>", unsafe_allow_html=True)
 
 with st.sidebar:
     st.header("🔑 کلیلەکان")
@@ -250,14 +244,13 @@ tab1, tab2, tab3 = st.tabs(["📥 ١. پڕۆژە", "⚙️ ٢. ستۆدیۆ (Liv
 with tab1:
     input_srt = st.text_area("دەقی SRT لێرە دابنێ:", height=300)
     
-    # خەمڵاندنی کات (ETA Calculation)
     if input_srt and active_keys:
         lines_count = len(parse_srt(input_srt))
         chunks_count = math.ceil(lines_count / 15)
         keys_qty = len(active_keys)
         
-        agent1_eta = 2 # خولەک
-        swarm_eta = math.ceil(chunks_count / keys_qty) * 1.5 # بریکاری ٢ و ٣ کاتیان دەوێت
+        agent1_eta = 2 
+        swarm_eta = math.ceil(chunks_count / keys_qty) * 1.5 
         total_eta = int(agent1_eta + swarm_eta)
         
         st.markdown(f"""
@@ -307,7 +300,7 @@ if st.session_state.is_running:
             update_console()
 
         parsed_data = parse_srt(input_srt)
-        chunks = [parsed_data[i:i+15] for i in range(0, len(parsed_data), 15)] # ١٥ دێڕ بۆ ئەوەی داتا زۆرەکە جێگەی ببێتەوە
+        chunks = [parsed_data[i:i+15] for i in range(0, len(parsed_data), 15)] 
         
         trans_bar = st.progress(0)
         preview_box = st.empty()
@@ -323,7 +316,9 @@ if st.session_state.is_running:
         chunks_to_process = [ (i, c) for i, c in enumerate(chunks) if i not in st.session_state.translated_chunks ]
         
         if chunks_to_process:
-            # دابەشکردنی ئەرکەکان بەسەر کلیلەکاندا
+            # پێدانی context بە مێشکی دەرەوە پێش چوونە ناو دەزووەکان (The Thread Fix)
+            safe_master_context = st.session_state.master_context
+            
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(active_keys)) as executor:
                 future_to_chunk = {}
                 for idx, chunk_data in enumerate(chunks_to_process):
@@ -334,7 +329,7 @@ if st.session_state.is_running:
                     log_to_console(f"ناردنی پارچەی {i+1} بۆ بریکاری ٢ و ٣...", "aqua")
                     update_console()
                     
-                    future = executor.submit(process_swarm_pipeline, chunk, k1, k2, gemini_model_name, split_limit, swarm_temp)
+                    future = executor.submit(process_swarm_pipeline, chunk, k1, k2, gemini_model_name, split_limit, swarm_temp, safe_master_context)
                     future_to_chunk[future] = (i, chunk)
                 
                 for future in concurrent.futures.as_completed(future_to_chunk):
@@ -352,7 +347,6 @@ if st.session_state.is_running:
                         if final_res and b_id in final_res:
                             new_item['text'] = final_res[b_id]
                         elif enriched_data and b_id in enriched_data:
-                            # گەڕانەوە بۆ پێشنیاری 3 (Cinematic) ئەگەر بریکاری کۆتایی شکستی هێنا
                             kur_match = re.search(r'<sug3>(.*?)</sug3>', enriched_data[b_id])
                             if kur_match: new_item['text'] = kur_match.group(1)
                         temp_chunk.append(new_item)
@@ -379,7 +373,7 @@ with tab3:
         st.balloons()
         col1, col2 = st.columns(2)
         with col1:
-            st.download_button("📥 داگرتنی فایلی تایتان (.srt)", st.session_state.final_srt, "Studio_PRO_V17_Master.srt")
+            st.download_button("📥 داگرتنی فایلی تایتان (.srt)", st.session_state.final_srt, "Studio_PRO_V18_Master.srt")
         with col2:
             st.download_button("📝 داگرتنی وەک دەقی سادە (.txt)", st.session_state.final_srt.replace('-->', '>>'), "Studio_PRO_Text.txt")
         st.text_area("کۆدی پەسەندکراو:", st.session_state.final_srt, height=450)
