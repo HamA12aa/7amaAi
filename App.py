@@ -11,23 +11,23 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("سیستەمی وەرگێڕانی فیلم (وەشانی Pro) 🎬")
-st.write("ئەم وەشانە مۆدێلی زۆر پێشکەوتووی (Gemini 1.5 Pro) بەکاردەهێنێت بۆ وەرگێڕانی دروست و پاراوی کوردی.")
+st.title("سیستەمی وەرگێڕانی فیلم (وەشانی Pro 2.5) 🎬")
+st.write("ئەم وەشانە نوێترین و بەهێزترین مۆدێلی گووگڵ (Gemini 2.5 Pro) بەکاردەهێنێت.")
 
 # --- وەرگرتنی کلیل لە لاتەنیشت ---
 api_key = st.sidebar.text_input("🔑 Google API Key لێرە دابنێ:", type="password")
 
 if api_key:
     genai.configure(api_key=api_key)
-    # لێرەدا زیرەکترین مۆدێلمان بەکارهێناوە
-    model = genai.GenerativeModel('gemini-1.5-pro')
+    # لێرەدا مۆدێلە نوێیەکەمان داناوە کە بە بێ کێشە کار دەکات
+    model = genai.GenerativeModel('gemini-2.5-pro')
 
     english_text = st.text_area("📝 دەقی ئینگلیزی لێرە دابنێ:", height=200)
 
     if st.button("🚀 دەستپێکردنی وەرگێڕان"):
         if english_text:
             try:
-                # قۆناغی ١: وەرگێڕانی واتا نەک وشە
+                # قۆناغی ١: وەرگێڕانی واتا
                 with st.status("١. وەرگێڕانی مانای ڕستەکان...") as s:
                     p1 = f"""You are a professional movie translator. Translate this English text to Kurdish Sorani. 
                     Rule 1: DO NOT translate word-for-word. 
