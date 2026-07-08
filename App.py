@@ -6,24 +6,21 @@ import os
 import re
 import random
 
-# --- ١. ڕێکخستنی لاپەڕە و دیزاینی پڕۆفیشناڵ ---
-st.set_page_config(page_title="AI Movie Director PRO | 10x Edition", layout="wide", page_icon="🎥")
+# --- ١. ڕێکخستنی لاپەڕە ---
+st.set_page_config(page_title="AI Movie Director PRO | 4-Slot Edition", layout="wide", page_icon="🎥")
 
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700&display=swap');
     * { font-family: 'Vazirmatn', sans-serif; }
-    .stTextArea textarea { direction: ltr !important; text-align: left !important; background-color: #0d1117; color: #58a6ff; font-family: monospace; border: 1px solid #30363d; }
     .kurdish-font { direction: rtl; text-align: right; }
-    .stButton>button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; font-weight: bold; border-radius: 10px; height: 3em; font-size: 18px; transition: 0.3s; border: none; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
-    .stButton>button:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.3); }
-    .status-box { padding: 10px; border-radius: 8px; background-color: #1c2128; color: #c9d1d9; border-left: 5px solid #2ea043; margin-bottom: 10px; }
+    .stButton>button { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; font-weight: bold; border-radius: 10px; height: 3.5em; border: none; width: 100%; }
+    .slot-label { color: #f39c12; font-weight: bold; margin-bottom: -10px; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- ٢. فەنکشنەکانی ئەندازیاری دەق (پاراستنی تۆکن و فۆرمات) ---
+# --- ٢. فەنکشنەکانی شیکردنەوەی دەق ---
 def parse_srt(srt_string):
-    """کاتەکان لادەبات بۆ ئەوەی AI سەرلێشێواو نەبێت و تۆکن کەمتر بخوات"""
     blocks = re.split(r'\n\s*\n', srt_string.strip())
     parsed = []
     for block in blocks:
@@ -36,174 +33,154 @@ def parse_srt(srt_string):
     return parsed
 
 def build_srt(parsed_list):
-    """کاتەکان بە دروستی دەخاتەوە سەر دەقە وەرگێڕدراوەکە"""
     return '\n\n'.join([f"{item['id']}\n{item['time']}\n{item['text']}" for item in parsed_list])
 
-# --- ٣. سیستەمی دابەشکاری بار (Load Balancer) ---
-def call_gemini_with_keys(prompt, keys_list):
-    """گۆڕینی زیرەکانەی کلیلەکان بۆ پاراستنی خێرایی و ڕێگری لە بلۆکبوون"""
-    random.shuffle(keys_list)
-    last_error = ""
+# --- ٣. سیستەمی ئاڵوگۆڕی ٤ کلیلەکە (Multi-Slot Logic) ---
+def call_gemini_safe(prompt, keys):
+    """تاقیکردنەوەی هەر ٤ کلیلەکە یەک لەدوای یەک ئەگەر یەکێکیان کاری نەکرد"""
+    valid_keys = [k for k in keys if k.strip()]
+    if not valid_keys:
+        raise Exception("هیچ کلیلێک داخڵ نەکراوە!")
     
-    for key in keys_list:
+    random.shuffle(valid_keys)
+    last_err = ""
+    
+    for key in valid_keys:
         try:
             genai.configure(api_key=key.strip())
-            # بەکارهێنانی مۆدێلی نوێی فلاش کە بۆ تێکست زۆر خێرایە
-            model = genai.GenerativeModel("gemini-1.5-flash") 
-            response = model.generate_content(prompt, request_options={"timeout": 60})
+            # بەکارهێنانی ناوی مۆدێل بەبێ پاشگر بۆ ڕێگری لە 404
+            model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+            response = model.generate_content(prompt)
             return response.text
         except Exception as e:
-            last_error = str(e)
+            last_err = str(e)
             continue
-            
-    raise Exception(f"⚠️ هەموو کلیلەکان لیمیت کراون یان هەڵەن! دوایین کێشە: {last_error}")
+    
+    raise Exception(f"⚠️ کێشە لە کلیلەکاندا هەیە: {last_err}")
 
-# --- ٤. سایدبار (بێ کلیلە سەیڤکراوەکان بۆ پاراستنی ئاسایش) ---
+# --- ٤. سایدبار بە ٤ شوێنی جیاواز ---
 with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg", width=120)
-    st.title("⚙️ ژووری کۆنترۆڵ (Directors Room)")
+    st.image("https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg", width=100)
+    st.title("🎬 بەڕێوبەری کلیلەکان")
     
-    st.warning("🔒 بۆ پاراستنی ئاسایش، کلیلەکانت لە گیتھەب مەهێڵەوە.")
-    gemini_keys_input = st.text_area(
-        "🔑 کلیلەکانی Google Gemini لێرە دابنێ:", 
-        placeholder="AIzaSy..., AIzaSy...", 
-        help="چەند کلیلێکت هەیە بە فاریزە (,) جیایان بکەرەوە بۆ ئەوەی خێراییەکەی ببێتە موشەک."
-    )
+    st.markdown("<p class='slot-label'>Slot 1 (سەرەکی)</p>", unsafe_allow_html=True)
+    key1 = st.text_input("", type="password", key="k1", placeholder="AIzaSy...")
+    
+    st.markdown("<p class='slot-label'>Slot 2</p>", unsafe_allow_html=True)
+    key2 = st.text_input("", type="password", key="k2", placeholder="AIzaSy...")
+    
+    st.markdown("<p class='slot-label'>Slot 3</p>", unsafe_allow_html=True)
+    key3 = st.text_input("", type="password", key="k3", placeholder="AIzaSy...")
+    
+    st.markdown("<p class='slot-label'>Slot 4</p>", unsafe_allow_html=True)
+    key4 = st.text_input("", type="password", key="k4", placeholder="AIzaSy...")
     
     st.markdown("---")
-    glossary = st.text_area("📚 فەرهەنگی کارەکتەرەکان", placeholder="John = جۆن\nMatrix = مەیتریکس")
-    st.markdown("---")
-    video_file = st.file_uploader("🎬 بارکردنی ڤیدیۆ (بۆ دەرهێنەری کۆتایی):", type=["mp4", "mov"])
+    glossary = st.text_area("📚 فەرهەنگی ناوی کارەکتەرەکان", placeholder="John = جۆن")
+    video_file = st.file_uploader("🎬 بارکردنی ڤیدیۆ (ئارەزوومەندانە):", type=["mp4"])
 
 # --- ٥. ڕووکاری سەرەکی ---
-st.markdown("<h1 style='text-align: center; color: #c9d1d9;'>🎥 وەرگێڕی سینەمایی بلیمەت (10x PRO Edition)</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #8b949e;'>بەهێزکراو بە ژیری تیمی هۆلیوود و سیستەمی ئاڵوگۆڕی کلیلەکان</p>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>🎥 وەرگێڕی ٤-سڵۆتی بلیمەت</h1>", unsafe_allow_html=True)
 
 col1, col2 = st.columns(2)
 with col1:
-    st.markdown("<h3 class='kurdish-font'>📥 دەقی ئینگلیزی (SRT)</h3>", unsafe_allow_html=True)
-    input_srt = st.text_area("", height=500, label_visibility="collapsed", placeholder="فایلی ژێرنووسەکەت لێرە دابنێ...")
+    st.markdown("<h3 class='kurdish-font'>📥 دەقی ئینگلیزی</h3>", unsafe_allow_html=True)
+    input_srt = st.text_area("", height=450, label_visibility="collapsed")
 
 with col2:
-    st.markdown("<h3 class='kurdish-font'>📤 پەخشی ڕاستەوخۆ (Live Stream)</h3>", unsafe_allow_html=True)
-    live_output = st.empty()
-    live_output.info("چاوەڕێی فەرمانی دەستپێکردنم...")
+    st.markdown("<h3 class='kurdish-font'>📤 وەرگێڕانی ڕاستەوخۆ</h3>", unsafe_allow_html=True)
+    live_box = st.empty()
+    live_box.info("چاوەڕێی کلیلەکان و دەقەکەم...")
 
-# --- ٦. لۆژیکی سەرەکی و پڕۆمپتە سیحرییەکان ---
-if st.button("🚀 ئەکشن! (دەستپێکردنی وەرگێڕان)"):
-    keys_list = [k.strip() for k in gemini_keys_input.split(",") if k.strip()]
+# --- ٦. لۆژیکی کارپێکردن ---
+if st.button("🚀 دەستپێکردنی وەرگێڕانی 10x"):
+    active_keys = [key1, key2, key3, key4]
     
-    if not input_srt:
-        st.warning("⚠️ تکایە سەرەتا دەقی ژێرنووسەکە دابنێ.")
-    elif not keys_list:
-        st.error("⚠️ تکایە بەلانی کەمەوە یەک کلیلی Gemini دابنێ.")
+    if not any(active_keys):
+        st.error("⚠️ تکایە لانی کەم یەک کلیل لە سڵۆتەکاندا دابنێ.")
+    elif not input_srt:
+        st.warning("⚠️ تکایە دەقی ژێرنووسەکە دابنێ.")
     else:
         try:
-            parsed_srt = parse_srt(input_srt)
-            # زیادکردنی قەبارەی پارچەکان بۆ 20 لەبەر ئەوەی پڕۆمپتەکەمان زۆر زیرەکترە
+            parsed_data = parse_srt(input_srt)
+            # پارچەکردن بۆ وەرگێڕان (٢٠ دێڕ ٢٠ دێڕ)
             chunk_size = 20
-            chunks = [parsed_srt[i:i+chunk_size] for i in range(0, len(parsed_srt), chunk_size)]
+            chunks = [parsed_data[i:i+chunk_size] for i in range(0, len(parsed_data), chunk_size)]
             
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            translated_parsed_srt = []
+            progress = st.progress(0)
+            status = st.empty()
+            translated_data = []
             
-            # --- قۆناغی ١: تیمی وەرگێڕانی دەق ---
             for idx, chunk in enumerate(chunks):
-                status_text.markdown(f"<div class='status-box'>⏳ تیمی هۆلیوود لە کاردان... (پارچەی {idx+1} لە کۆی {len(chunks)})</div>", unsafe_allow_html=True)
+                status.markdown(f"**⚡ وەرگێڕان بە کلیلێکی چالاک... پارچەی {idx+1} لە {len(chunks)}**")
                 
-                text_to_translate = ""
+                # ئامادەکردنی دەق بۆ AI
+                prompt_text = ""
                 for item in chunk:
-                    text_to_translate += f"[{item['id']}]\n{item['text']}\n\n"
+                    prompt_text += f"[{item['id']}]\n{item['text']}\n\n"
                 
-                # پڕۆمپتی ١٠ هێندە بەهێزکراو (The 10x Master Prompt)
-                prompt_gemini = f"""You are an elite Hollywood Localization Team translating subtitles to Kurdish Sorani.
-Your team consists of 3 distinct roles working simultaneously:
-1. The Linguist: Ensures 100% accurate meaning from English.
-2. The Cinematic Writer: Adapts the dialogue to sound like a natural, dramatic, and authentic Kurdish movie (using pure Sorani vocabulary, avoiding literal weird translations).
-3. The Editor: Ensures the formatting is strictly maintained.
+                # پڕۆمپتی پڕۆفیشناڵ
+                master_prompt = f"""You are a pro movie translator. Translate to natural Kurdish Sorani.
+Rules:
+- Format: [ID] followed by Kurdish text.
+- Use this glossary: {glossary}
+- Be cinematic, not literal.
+- ONLY output IDs and translation. No chat.
 
-CRITICAL RULES:
-- Output MUST be exactly in this format: [ID] followed by the Kurdish text on the next line.
-- DO NOT output any introductions, markdown formatting (like ```), or explanations. ONLY the IDs and translated text.
-- If a sentence continues from a previous line, make sure the grammatical flow in Kurdish is natural.
-- Mandatory Glossary to respect: {glossary}
-
-Input Subtitles to Translate:
-{text_to_translate}"""
+Input:
+{prompt_text}"""
                 
-                translated_chunk_text = call_gemini_with_keys(prompt_gemini, keys_list)
+                # بانگکردنی AI بە سیستەمی ٤ سڵۆتەکە
+                translated_chunk = call_gemini_safe(master_prompt, active_keys)
                 
-                # دۆزینەوەی دەقەکان بە وردی
-                pattern = r'\[(\d+)\]\n(.*?)(?=\n\[\d+\]|\Z)'
-                matches = re.findall(pattern, translated_chunk_text + '\n', re.DOTALL)
-                translated_dict = {m[0]: m[1].strip() for m in matches}
+                # جیاکردنەوەی ئەنجامەکان
+                matches = re.findall(r'\[(\d+)\]\n(.*?)(?=\n\[\d+\]|\Z)', translated_chunk + '\n', re.DOTALL)
+                result_map = {m[0]: m[1].strip() for m in matches}
                 
                 for item in chunk:
                     new_item = item.copy()
-                    if item['id'] in translated_dict:
-                        new_item['text'] = translated_dict[item['id']]
-                    translated_parsed_srt.append(new_item)
+                    if item['id'] in result_map:
+                        new_item['text'] = result_map[item['id']]
+                    translated_data.append(new_item)
                 
-                current_full_srt = build_srt(translated_parsed_srt)
-                live_output.code(current_full_srt, language="srt")
-                progress_bar.progress((idx + 1) / len(chunks))
+                # پیشاندانی ڕاستەوخۆ
+                current_srt = build_srt(translated_data)
+                live_box.code(current_srt, language="srt")
+                progress.progress((idx + 1) / len(chunks))
                 
-                # سیستەمی پشوودانی زیرەک بەپێی ژمارەی کلیلەکان
-                if len(keys_list) == 1:
-                    time.sleep(4)
+                # وەستانی کەم ئەگەر تەنها یەک کلیل هەبێت بۆ پاراستنی Rate Limit
+                if len([k for k in active_keys if k]) == 1:
+                    time.sleep(3)
                 else:
-                    time.sleep(1)
+                    time.sleep(0.5)
 
-            final_result = current_full_srt
+            final_srt = current_srt
 
-            # --- قۆناغی ٢: دەرهێنەری ڤیدیۆ (Gemini Vision) ---
+            # قۆناغی ڤیدیۆ (ئەگەر هەبێت)
             if video_file:
-                status_text.markdown("<div class='status-box' style='border-left-color: #f39c12;'>👁️ دەرهێنەر خەریکی بینینی ڤیدیۆکەیە بۆ هاوکاتکردنی (Sync) کۆتایی...</div>", unsafe_allow_html=True)
-                
-                genai.configure(api_key=keys_list[0])
-                model_gemini = genai.GenerativeModel("gemini-1.5-pro") # بەکارهێنانی Pro بۆ بینینی ڤیدیۆ چونکە زیرەکترە
+                status.info("👁️ بریکاری ڤیدیۆ: خەریکی هاوکاتکردنی کۆتایییە...")
+                # بەکارهێنانی یەکەم کلیل کە ئیش دەکات بۆ ڤیدیۆ
+                genai.configure(api_key=[k for k in active_keys if k][0])
+                model_v = genai.GenerativeModel("gemini-1.5-flash")
                 
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
                     tmp.write(video_file.read())
-                    temp_path = tmp.name
+                    v_path = tmp.name
                 
-                # بارکردن بۆ سێرڤەری گووگڵ
-                g_file = genai.upload_file(path=temp_path)
+                g_file = genai.upload_file(path=v_path)
                 while g_file.state.name == "PROCESSING":
                     time.sleep(2)
                     g_file = genai.get_file(g_file.name)
                 
-                # پڕۆمپتی دەرهێنەر (The Director Prompt)
-                prompt_vision = f"""You are an Academy Award-winning Film Director and Subtitle Synchronizer.
-I have provided a video clip and its translated Kurdish Sorani SRT subtitles.
-Your tasks:
-1. Watch the video, observing the actors' emotions, lip movements, and scene transitions.
-2. Adjust the timing (timestamps) or slightly tweak the Kurdish text so it fits perfectly with the visual context and audio length.
-3. You MUST output ONLY the finalized, valid SRT text. Do NOT wrap it in markdown block quotes.
+                prompt_v = f"Watch the video and fix this Kurdish SRT timing or text to match the scenes perfectly:\n\n{final_srt}"
+                res_v = model_v.generate_content([g_file, prompt_v])
+                final_srt = res_v.text.replace("```srt", "").replace("```", "").strip()
+                os.remove(v_path)
+                live_box.code(final_srt, language="srt")
 
-Draft SRT Subtitles:
-{final_result}"""
-                
-                vision_response = model_gemini.generate_content([g_file, prompt_vision])
-                # سڕینەوەی ماڕکداون ئەگەر AI بە هەڵە داینابوو
-                clean_vision_text = vision_response.text.replace("```srt", "").replace("```", "").strip()
-                final_result = clean_vision_text
-                
-                os.remove(temp_path)
-                live_output.code(final_result, language="srt")
-                st.success("✅ دەرهێنەر ڤیدیۆکەی پەسەند کرد! ژێرنووسەکە بە تەواوی گونجێندرا.")
-
-            status_text.markdown("<div class='status-box' style='border-left-color: #3498db;'>🎉 پڕۆسەی وەرگێڕانی سینەمایی بە سەرکەوتوویی تەواو بوو!</div>", unsafe_allow_html=True)
+            status.success("🎉 وەرگێڕان بە سەرکەوتوویی تەواو بوو!")
             st.balloons()
-            
-            st.download_button(
-                label="📥 داگرتنی فایلی SRT (بە کوالێتی هۆلیوود)",
-                data=final_result,
-                file_name="Hollywood_Movie_Kurdish.srt",
-                mime="text/plain"
-            )
+            st.download_button("📥 داگرتنی فایلی SRT", data=final_srt, file_name="kurdish_subs.srt")
 
         except Exception as e:
             st.error(f"❌ هەڵەیەک ڕوویدا: {str(e)}")
-            st.info("💡 تکایە دڵنیابە لەوەی کلیلەکانت ڕاستن، یان کەمێک چاوەڕێ بکە ئەگەر فشاری زۆر لەسەر سێرڤەرەکان بێت.")
