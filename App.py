@@ -1,145 +1,87 @@
 import streamlit as st
 import google.generativeai as genai
+from groq import Groq
 
-# --- ١. ڕێکخستنی سەرەکی لاپەڕە و دیزاین ---
-st.set_page_config(page_title="Cinematic AI Translator", page_icon="🍿", layout="wide")
+# --- ڕێکخستنی لاپەڕە ---
+st.set_page_config(page_title="AI Movie Agents 5.0", layout="wide")
 
-# دیزاینی تایبەت بە CSS بۆ جوانییەکی پرۆفیشناڵ
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;900&display=swap');
-    
+    @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700&display=swap');
     * { font-family: 'Vazirmatn', sans-serif; direction: rtl; }
-    
-    /* دیزاینی تایتڵ */
-    .title-text {
-        text-align: center;
-        color: #E50914;
-        font-size: 45px;
-        font-weight: 900;
-        text-shadow: 2px 2px 5px rgba(0,0,0,0.4);
-        margin-bottom: 5px;
-    }
-    .subtitle-text {
-        text-align: center;
-        color: #999;
-        font-size: 18px;
-        margin-bottom: 30px;
-    }
-    
-    /* دیزاینی بۆکسەکانی دەق */
-    .stTextArea textarea {
-        background-color: #1e1e1e;
-        color: #ffffff;
-        border: 2px solid #333;
-        border-radius: 10px;
-        font-size: 16px;
-        padding: 15px;
-    }
-    .stTextArea textarea:focus { border: 2px solid #E50914; }
-    
-    /* دیزاینی دوگمە */
-    .stButton button {
-        background: linear-gradient(90deg, #E50914 0%, #83060C 100%);
-        color: white;
-        font-size: 20px;
-        font-weight: bold;
-        border-radius: 10px;
-        border: none;
-        width: 100%;
-        padding: 15px;
-        transition: 0.3s;
-    }
-    .stButton button:hover {
-        transform: scale(1.02);
-        box-shadow: 0px 5px 15px rgba(229, 9, 20, 0.4);
-    }
-    
-    /* دیزاینی بۆکسەکانی ئەنجام */
-    .success-box {
-        background-color: #0b3b24;
-        border-right: 5px solid #00ff88;
-        padding: 20px;
-        border-radius: 10px;
-        margin-top: 20px;
-        color: white;
-        font-size: 18px;
-    }
+    .stApp { background-color: #0b0c10; color: #66fcf1; }
+    .stTextArea textarea { background-color: #1f2833 !important; color: #45a29e !important; direction: ltr !important; }
+    .agent-status { border-right: 4px solid #66fcf1; padding-right: 15px; margin-bottom: 10px; color: #c5c6c7; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- ٢. پیشاندانی تایتڵ ---
-st.markdown('<div class="title-text">🎬 وەرگێڕی سینەمایی زیرەک</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle-text">نوێترین سیستەمی وەرگێڕانی فیلم بە کوالێتی ستۆدیۆکان (V 3.0)</div>', unsafe_allow_html=True)
-
-# --- ٣. بەشی ڕێکخستنەکان (لەلای ڕاست) ---
+# --- لای تەنیشت بۆ کلیلەکان ---
 with st.sidebar:
-    st.header("⚙️ ڕێکخستنەکان")
-    api_key = st.text_input("🔑 Google API Key:", type="password")
-    
+    st.title("🔑 کلیلی سێرڤەرەکان")
+    gemini_key = st.text_input("Google API Key:", type="password")
+    groq_key = st.text_input("Groq API Key (Llama 3.1):", type="password")
     st.markdown("---")
-    st.subheader("فیلمەکە چۆنە؟")
-    movie_genre = st.selectbox("🎭 جۆری فیلم:", ["ئاکشن و هەیاهو", "دراما و سۆزداری", "کۆمیدی", "خەیاڵی زانستی", "دۆکیومێنتاری"])
-    dialogue_tone = st.selectbox("🗣️ شێوازی قسەکردن:", ["سەر شەقام (Slang/سروشتی)", "فەرمی (ئەدەبی)"])
-    
-    st.markdown("---")
-    st.info("💡 **زانیاری:** ئەم سیستەمە خێراییەکەی دوو هێندە کراوە و لەسەر مۆدێلی Gemini 2.5 Flash کار دەکات بێ سنور.")
+    genre = st.selectbox("🎭 جۆری فیلم:", ["ئەنیمێ", "ئاکشن", "دراما", "کۆمیدی"])
 
-# --- ٤. بەشی سەرەکی وەرگێڕان ---
-col1, col2 = st.columns([1, 1]) # دوو بەشی یەکسان بۆ شاشە گەورەکان
+# --- فەنکشنەکانی بریکارەکان ---
+def run_agents(eng_text):
+    # 1. Gemini - Translator
+    genai.configure(api_key=gemini_key)
+    gem_model = genai.GenerativeModel('gemini-2.0-flash-exp')
+    
+    # 2. Groq - Llama 3.1
+    client = Groq(api_key=groq_key)
+
+    # قۆناغی ١ (Gemini): وەرگێڕان
+    with st.status("🕵️ بریکاری ١: خەریکی وەرگێڕانی ماناکەیە...") as s:
+        res1 = gem_model.generate_content(f"Translate this movie dialogue to Kurdish Sorani. Focus on meaning: {eng_text}")
+        trans1 = res1.text
+        s.update(label="✅ وەرگێڕان تەواو بوو", state="complete")
+
+    # قۆناغی ٢ (Gemini): شێوازی قسەکردن
+    with st.status("🎭 بریکاری ٢: خەریکی گونجاندنی کلتوورییە...") as s:
+        res2 = gem_model.generate_content(f"Adapt this Kurdish text to sound like a natural {genre}. Use cool Kurdish slang: {trans1}")
+        trans2 = res2.text
+        s.update(label="✅ شێوازی قسەکردن ڕێکخرا", state="complete")
+
+    # قۆناغی ٣ (Llama 3.1 via Groq): ڕێزمان
+    with st.status("✍️ بریکاری ٣: خەریکی ڕاستکردنەوەی ڕێزمانە...") as s:
+        res3 = client.chat.completions.create(
+            model="llama-3.1-70b-versatile",
+            messages=[{"role": "user", "content": f"Fix the Kurdish Sorani grammar and verb tenses in this text: {trans2}"}]
+        )
+        trans3 = res3.choices[0].message.content
+        s.update(label="✅ ڕێزمان چاککرا", state="complete")
+
+    # قۆناغی ٤ (Llama 3.1 via Groq): فۆرماتی SRT
+    with st.status("📏 بریکاری ٤: خەریکی ڕێکخستنی درێژی ڕستەکانە...") as s:
+        res4 = client.chat.completions.create(
+            model="llama-3.1-70b-versatile",
+            messages=[{"role": "user", "content": f"Make sure these Kurdish lines are short enough for subtitles. Keep the SRT format perfectly: {trans3}"}]
+        )
+        trans4 = res4.choices[0].message.content
+        s.update(label="✅ فۆرمات ڕێکخرا", state="complete")
+
+    # قۆناغی ٥ (Gemini): پیاچوونەوەی کۆتایی
+    with st.status("🎬 بریکاری ٥: پیاچوونەوەی کۆتایی دەرهێنەر...") as s:
+        res5 = gem_model.generate_content(f"Compare original English with this Kurdish. Fix any final errors and output ONLY the final SRT: \nEnglish: {eng_text}\nKurdish: {trans4}")
+        final_out = res5.text
+        s.update(label="✅ هەموو قۆناغەکان تەواو بوون!", state="complete")
+        
+    return final_out
+
+# --- ڕووکاری سایتەکە ---
+st.header("🎬 وەرگێڕی ٥-ئەفسەرەکە (Gemini 2.0 + Llama 3.1)")
+
+col1, col2 = st.columns(2)
 
 with col1:
-    english_text = st.text_area("🇬🇧 دەقی ئینگلیزی لێرە دابنێ:", height=250, placeholder="وەک: ?What the hell are you doing here")
+    input_srt = st.text_area("📥 دەقی ئینگلیزی لێرە دابنێ:", height=400)
 
 with col2:
-    if st.button("🚀 وەرگێڕان بۆ کوردی"):
-        if not api_key:
-            st.error("⚠️ تکایە سەرەتا API Key لە لاتەنیشت دابنێ!")
-        elif not english_text:
-            st.warning("⚠️ تکایە دەقێکی ئینگلیزی بنووسە.")
+    if st.button("🚀 دەستپێکردنی وەرگێڕانی جادوویی"):
+        if gemini_key and groq_key and input_srt:
+            result = run_agents(input_srt)
+            st.code(result, language="srt")
         else:
-            try:
-                genai.configure(api_key=api_key)
-                model = genai.GenerativeModel('gemini-2.5-flash')
-
-                # قۆناغی ١: وەرگێڕانی بنەڕەتی بەپێی جۆر و شێواز (Mega Prompt 1)
-                with st.spinner("⏳ بریکاری یەکەم خەریکی لێکدانەوەی مانای فیلمەکەیە..."):
-                    prompt1 = f"""You are an elite Hollywood movie translator. Translate the following English dialogue to Kurdish Sorani.
-                    Context provided by user:
-                    - Movie Genre: {movie_genre}
-                    - Desired Tone: {dialogue_tone}
-                    
-                    CRITICAL RULES:
-                    1. NEVER translate word-for-word. Capture the exact vibe, emotion, and context of a {movie_genre} movie.
-                    2. If it's English slang or an idiom, find the equivalent Kurdish idiom.
-                    3. Do not include any explanations, just the translation.
-                    
-                    English Text: {english_text}"""
-                    
-                    res1 = model.generate_content(prompt1)
-                    raw_translation = res1.text
-
-                # قۆناغی ٢: دەرهێنەری سینەمایی (Mega Prompt 2)
-                with st.spinner("🎥 بریکاری دووەم خەریکی ڕێکخستنی سینەمایی و لابردنی هەڵەکانە..."):
-                    prompt2 = f"""You are the final Kurdish Subtitle Director. Review this Kurdish translation of an English dialogue.
-                    Original English: {english_text}
-                    Current Kurdish: {raw_translation}
-                    
-                    YOUR TASK:
-                    1. Polish the Kurdish so it flows perfectly on a movie screen. It MUST sound like natural, everyday Kurdish spoken in Kurdistan.
-                    2. Shorten long sentences if possible without losing meaning (perfect for subtitles).
-                    3. Fix any grammatical errors (especially pronouns and verb tenses in Sorani).
-                    4. ONLY output the final masterpiece Kurdish text. No extra text, no quotes.
-                    """
-                    
-                    res2 = model.generate_content(prompt2)
-                    final_kurdish = res2.text
-
-                # پیشاندانی ئەنجامێکی نایاب
-                st.markdown(f'<div class="success-box">✅ <b>ئەنجامی پرۆفیشناڵ:</b><br><br>{final_kurdish}</div>', unsafe_allow_html=True)
-                st.balloons() # ئاهەنگگێڕانێکی بچووک کاتێک تەواو دەبێت!
-
-            except Exception as e:
-                st.error(f"❌ کێشەیەک ڕوویدا: {e}")
-    else:
-        st.info("👈 ئەنجامەکە لێرە دەردەکەوێت...")
+            st.error("تکایە هەردوو کلیلەکە و دەقەکە داخڵ بکە!")
