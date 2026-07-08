@@ -7,7 +7,7 @@ import random
 # ==========================================
 # 1. UI SETUP & BEAUTIFUL CSS
 # ==========================================
-st.set_page_config(page_title="AI Movie Director PRO | V7.0", layout="wide", page_icon="🎬")
+st.set_page_config(page_title="AI Movie Director PRO | V7.1", layout="wide", page_icon="🎬")
 
 st.markdown("""
     <style>
@@ -42,16 +42,15 @@ def build_srt(parsed_list):
     return '\n\n'.join([f"{item['id']}\n{item['time']}\n{item['text']}" for item in parsed_list])
 
 # ==========================================
-# 3. AGENT LOGIC (XML TRANSLATOR)
+# 3. AGENT LOGIC (WITH AUTO-MODEL FINDER)
 # ==========================================
-def translate_chunk_with_agents(chunk, active_keys, glossary, visual_container, selected_model):
+def translate_chunk_with_agents(chunk, active_keys, glossary, visual_container, starting_model):
     if not active_keys:
         raise Exception("کلیلەکان بەتاڵن!")
 
-    # ئامادەکردنی دەقەکە بە شێوازی XML بۆ ئەوەی AI سەرلێشێواو نەبێت
+    # ئامادەکردنی دەقەکە بە شێوازی XML
     xml_input = ""
     for item in chunk:
-        # لادانی نیشانە سەیرەکان بۆ ئەوەی کێشە دروست نەبێت
         clean_text = item['text'].replace('<', '').replace('>', '')
         xml_input += f'<sub id="{item["id"]}">{clean_text}</sub>\n'
 
@@ -71,41 +70,55 @@ Output MUST be exactly in this format:
 <sub id="1">وەرگێڕانەکە لێرە...</sub>
 """
 
+    # سیستەمی ئۆتۆماتیکی دۆزینەوەی مۆدێل ئەگەر یەکێکیان 404 بوو
+    fallback_models = [starting_model, "gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro", "gemini-1.0-pro"]
+    models_to_try = []
+    for m in fallback_models:
+        if m not in models_to_try:
+            models_to_try.append(m)
+            
+    current_model_index = 0
     attempts = 0
-    while attempts < len(active_keys) * 3:
+    max_attempts = len(active_keys) * 4
+
+    while attempts < max_attempts:
         current_key = random.choice(active_keys)
+        current_model = models_to_try[current_model_index]
+        
         try:
-            visual_container.markdown(f"<div class='agent-box'>⚙️ [Agent]: Connecting (Key: ***{current_key[-4:]})</div>", unsafe_allow_html=True)
+            visual_container.markdown(f"<div class='agent-box'>⚙️ [Agent]: Connecting (Key: ***{current_key[-4:]}) | Model: <b>{current_model}</b></div>", unsafe_allow_html=True)
             
             genai.configure(api_key=current_key)
-            model = genai.GenerativeModel(selected_model, generation_config={"temperature": 0.2})
+            model = genai.GenerativeModel(current_model, generation_config={"temperature": 0.2})
             
             visual_container.markdown(f"<div class='agent-box'>🧠 [Agent]: Translating to Kurdish Sorani...</div>", unsafe_allow_html=True)
             
             response = model.generate_content(prompt)
-            response_text = response.text
+            clean_response = response.text.replace('```xml', '').replace('```', '').strip()
             
-            # پاککردنەوەی وەڵامەکە لە نیشانەی ماڕکداون
-            clean_response = response_text.replace('```xml', '').replace('```', '').strip()
-            
-            # دەرهێنانی وەرگێڕانەکان بە Regex لەناو تاگەکانی XML
             matches = re.findall(r'<sub id="(\d+)"\s*>(.*?)</sub>', clean_response, re.DOTALL | re.IGNORECASE)
             
             if matches:
                 result_map = {m[0].strip(): m[1].strip() for m in matches}
-                visual_container.markdown(f"<div class='agent-box'>✂️ [Agent]: Extraction successful!</div>", unsafe_allow_html=True)
+                visual_container.markdown(f"<div class='agent-box'>✅ [Agent]: Extraction successful!</div>", unsafe_allow_html=True)
                 return result_map
             else:
                 visual_container.warning("⚠️ مۆدێلەکە فۆرماتەکەی تێکدا، دووبارە هەوڵدەدەینەوە...")
+                time.sleep(1)
                 
         except Exception as e:
             err_str = str(e)
             if "429" in err_str:
                 visual_container.error(f"🔴 Limit 429 Reached! Switching keys...")
                 time.sleep(2)
-            elif "404" in err_str:
-                visual_container.error(f"🔴 Error 404: مۆدێلی {selected_model} نەدۆزرایەوە!")
-                return None
+            elif "404" in err_str or "not found" in err_str.lower():
+                # گۆڕینی ئۆتۆماتیکی بۆ مۆدێلی داهاتوو لەکاتی هەڵەی 404
+                visual_container.error(f"🔴 Error 404: مۆدێلی {current_model} کار ناکات. گەڕان بەدوای مۆدێلێکی تردا...")
+                current_model_index += 1
+                if current_model_index >= len(models_to_try):
+                    visual_container.error("❌ هەموو مۆدێلەکان تاقی کرانەوە و هیچیان نەدۆزرانەوە لە سێرڤەرەکەدا!")
+                    return None
+                time.sleep(1)
             else:
                 visual_container.error(f"❌ Error: {err_str[:80]}")
                 time.sleep(1)
@@ -116,13 +129,14 @@ Output MUST be exactly in this format:
 # ==========================================
 # 4. MAIN UI LAYOUT
 # ==========================================
-st.markdown("<h1 class='main-title'>🎬 AI Movie Director PRO (V7.0)</h1>", unsafe_allow_html=True)
-st.markdown("<p class='sub-title'>وەشانی ٧ - بەکارهێنانی سیستەمی XML بۆ دڵنیایی ١٠٠٪ لە وەرگێڕان</p>", unsafe_allow_html=True)
+st.markdown("<h1 class='main-title'>🎬 AI Movie Director PRO (V7.1)</h1>", unsafe_allow_html=True)
+st.markdown("<p class='sub-title'>سیستەمی دۆزینەوەی ئۆتۆماتیکی مۆدێل (Auto-Fallback)</p>", unsafe_allow_html=True)
 
 with st.sidebar:
     st.header("⚙️ ڕێکخستنەکان")
+    # لامبردووە لە پاشگری latest بۆ ئەوەی باشتر کار بکات
     ai_model = st.selectbox("🤖 مۆدێلی زیرەکی دەستکرد:", 
-                            ["gemini-1.5-flash-latest", "gemini-1.5-pro-latest", "gemini-1.5-flash"],
+                            ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"],
                             index=0)
     
     st.markdown("---")
@@ -165,7 +179,7 @@ if getattr(st.session_state, 'is_translating', False):
         
         parsed_data = parse_srt(input_srt)
         total_blocks = len(parsed_data)
-        chunk_size = 10  # ناردنی ١٠ دێڕ پێکەوە
+        chunk_size = 10 
         
         translated_final = []
         progress_bar = st.progress(0)
@@ -179,7 +193,6 @@ if getattr(st.session_state, 'is_translating', False):
             with agent_status_box.container():
                 st.markdown(f"**پارچەی {i+1} بۆ {min(i+chunk_size, total_blocks)} لە کۆی {total_blocks}**")
                 
-                # ناردن بۆ گووگڵ و وەرگرتنەوەی ئەنجام بە فۆرماتی فەرهەنگ {id: text}
                 result_map = translate_chunk_with_agents(chunk, active_keys, glossary, st.empty(), ai_model)
                 
                 if result_map:
@@ -187,7 +200,6 @@ if getattr(st.session_state, 'is_translating', False):
                         new_item = item.copy()
                         item_id = str(item['id'])
                         
-                        # ئەگەر ئایدییەکە لە وەڵامەکەدا هەبوو بیخە شوێنی خۆی
                         if item_id in result_map and result_map[item_id]:
                             new_item['text'] = result_map[item_id]
                         else:
@@ -198,11 +210,10 @@ if getattr(st.session_state, 'is_translating', False):
                     st.error(f"❌ ئەم بەشە شکستی هێنا. دەقەکە بە ئینگلیزی دەمێنێتەوە.")
                     translated_final.extend(chunk)
             
-            # پیشاندانی ڕاستەوخۆ
             current_srt = build_srt(translated_final)
             live_preview_box.markdown(f"<div class='kurdish-preview'>{current_srt[-600:].replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
             progress_bar.progress(min((i + chunk_size) / total_blocks, 1.0))
-            time.sleep(1)
+            time.sleep(1.5)
             
         st.session_state.final_srt = build_srt(translated_final)
         st.session_state.is_translating = False
