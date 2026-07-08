@@ -9,7 +9,7 @@ import os
 # ==========================================
 # 1. UI SETUP & BEAUTIFUL CSS
 # ==========================================
-st.set_page_config(page_title="AI Movie Director PRO | V10.0 Masterpiece", layout="wide", page_icon="🎬")
+st.set_page_config(page_title="AI Movie Director PRO | V10.1 Masterpiece", layout="wide", page_icon="🎬")
 
 st.markdown("""
     <style>
@@ -46,12 +46,9 @@ def build_srt(parsed_list):
     return '\n\n'.join([f"{item['id']}\n{item['time']}\n{item['text']}" for item in parsed_list])
 
 # ==========================================
-# 3. AGENT 1: STORY & CONTEXT ANALYZER
+# 3. AGENT 1: STORY & CONTEXT ANALYZER (Fixed limits)
 # ==========================================
-def analyze_master_context(api_key, model_name, srt_text, glossary, video_file=None):
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_name)
-    
+def analyze_master_context(active_keys, model_name, srt_text, glossary, video_file=None):
     prompt = f"""You are Agent 1 (The Analyst). Read this Anime subtitle file.
 Your job is to generate a 'Master Context Bible' for the translation team.
 Include:
@@ -61,28 +58,46 @@ Include:
 Glossary: {glossary}
 
 Subtitles:
-{srt_text[:15000]} # Limit to avoid extremely long tokens if not needed
+{srt_text[:10000]} 
 """
-    contents = [prompt]
     
-    if video_file is not None:
-        with st.spinner("⏳ بریکاری ١ خەریکی سەیرکردن و شیکردنەوەی ڤیدیۆکەیە..."):
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
-                tmp.write(video_file.read())
-                v_path = tmp.name
-            
-            try:
-                g_file = genai.upload_file(path=v_path)
-                while g_file.state.name == "PROCESSING":
-                    time.sleep(2)
-                    g_file = genai.get_file(g_file.name)
-                contents.insert(0, g_file)
-            except Exception as e:
-                st.error(f"⚠️ کێشە لە خوێندنەوەی ڤیدیۆکە: {e}")
+    attempts = 0
+    max_attempts = len(active_keys) * 2
+
+    # سیستەمی گۆڕینی کلیلەکان بۆ بریکاری ١ زیاد کرا
+    while attempts < max_attempts:
+        current_key = random.choice(active_keys)
+        genai.configure(api_key=current_key)
+        model = genai.GenerativeModel(model_name)
+        contents = [prompt]
+        
+        try:
+            if video_file is not None:
+                with st.spinner(f"⏳ بریکاری ١ خەریکی ڤیدیۆکەیە (بە بەکارهێنانی کلیل: ***{current_key[-4:]})..."):
+                    video_file.seek(0) # گەڕاندنەوەی ڤیدیۆکە بۆ سەرەتا لە ئەگەری دووبارەبوونەوە
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
+                        tmp.write(video_file.read())
+                        v_path = tmp.name
+                    
+                    g_file = genai.upload_file(path=v_path)
+                    while g_file.state.name == "PROCESSING":
+                        time.sleep(2)
+                        g_file = genai.get_file(g_file.name)
+                    contents.insert(0, g_file)
+                    
+            with st.spinner(f"🕵️ بریکاری ١: شیکردنەوەی چیرۆک (کلیل: ***{current_key[-4:]})..."):
+                response = model.generate_content(contents)
+                return response.text
                 
-    with st.spinner("🕵️ بریکاری ١: خەریکی کۆکردنەوەی زانیاری و چیرۆکی ئەنیمییەکەیە..."):
-        response = model.generate_content(contents)
-        return response.text
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "ResourceExhausted" in err_str:
+                time.sleep(2) # کلیلەکە لیمیت بووە، دەچێتە سەر یەکێکی تر
+            else:
+                time.sleep(1)
+        attempts += 1
+        
+    return "⚠️ بریکاری ١ نەیتوانی چیرۆکەکە بخوێنێتەوە بەهۆی لیمیتی کلیلەکان. بەڵام وەرگێڕانەکە بەردەوام دەبێت..."
 
 # ==========================================
 # 4. MULTI-AGENT TRANSLATION PROCESS (Agents 2, 3, 4)
@@ -93,7 +108,6 @@ def translate_chunk_with_agents(chunk, active_keys, master_context, visual_conta
         clean_text = item['text'].replace('<', '').replace('>', '')
         xml_input += f'<sub id="{item["id"]}">{clean_text}</sub>\n'
 
-    # The Mega-Prompt for Chain of Thought
     prompt = f"""You are an elite team of Anime Translators translating English to Central Kurdish (Sorani).
 Master Context & Story Bible (From Agent 1):
 {master_context}
@@ -133,14 +147,12 @@ You MUST format your exact output like this:
             response = model.generate_content(prompt)
             response_text = response.text
             
-            # Extracting thoughts for UI
             a2_thoughts = re.search(r'<agent2_thoughts>(.*?)</agent2_thoughts>', response_text, re.DOTALL)
             a3_draft = re.search(r'<agent3_draft>(.*?)</agent3_draft>', response_text, re.DOTALL)
             
             if a2_thoughts and a3_draft:
                 visual_container.markdown(f"<div class='thought-box'><b>🕵️ Agent 2 (Suggester):</b> {a2_thoughts.group(1)[:150]}...<br><b>✍️ Agent 3 (Translator):</b> Draft generated safely without shortening.</div>", unsafe_allow_html=True)
 
-            # Extracting final XML
             matches = re.findall(r'<sub id="(\d+)"\s*>(.*?)</sub>', response_text, re.DOTALL | re.IGNORECASE)
             
             if matches:
@@ -153,7 +165,7 @@ You MUST format your exact output like this:
                 
         except Exception as e:
             err_str = str(e)
-            if "429" in err_str:
+            if "429" in err_str or "ResourceExhausted" in err_str:
                 visual_container.error(f"🔴 Limit 429! Switching keys...")
                 time.sleep(2)
             else:
@@ -166,7 +178,7 @@ You MUST format your exact output like this:
 # ==========================================
 # 5. MAIN UI & AUTO-FETCHING MODELS
 # ==========================================
-st.markdown("<h1 class='main-title'>🎬 AI Movie Director PRO (V10 - Masterpiece)</h1>", unsafe_allow_html=True)
+st.markdown("<h1 class='main-title'>🎬 AI Movie Director PRO (V10.1 - Masterpiece)</h1>", unsafe_allow_html=True)
 st.markdown("<p class='sub-title'>سیستەمی ٤-بریکاری زیرەک بۆ وەرگێڕانی ئەنیمی بەبێ کورتکردنەوەی ڕستەکان!</p>", unsafe_allow_html=True)
 
 with st.sidebar:
@@ -230,9 +242,9 @@ if start_btn:
 
 if getattr(st.session_state, 'is_translating', False):
     with tab2:
-        # هەنگاوی یەکەم: دروستکردنی فایلی تێبینییەکان لەلایەن بریکاری ١
+        # هەنگاوی یەکەم: دروستکردنی فایلی تێبینییەکان لەلایەن بریکاری ١ (گۆڕدرا بۆ ئەوەی هەموو کلیلەکان بەکاربێنێت)
         if not st.session_state.master_context:
-            st.session_state.master_context = analyze_master_context(active_keys[0], gemini_model_name, input_srt, glossary, uploaded_video)
+            st.session_state.master_context = analyze_master_context(active_keys, gemini_model_name, input_srt, glossary, uploaded_video)
             st.success("✅ بریکاری ١ کۆتایی بە شیکردنەوەی چیرۆکەکە هێنا!")
             with st.expander("👁️ بینینی تێبینییەکانی بریکاری ١ (Master Context)"):
                 st.write(st.session_state.master_context)
@@ -241,7 +253,7 @@ if getattr(st.session_state, 'is_translating', False):
         
         parsed_data = parse_srt(input_srt)
         total_blocks = len(parsed_data)
-        chunk_size = 8 # کەم کراوەتەوە بۆ ئەوەی فوول سەرنج بدەنە مانا و درێژی ڕستەکان
+        chunk_size = 8 
         
         translated_final = []
         progress_bar = st.progress(0)
