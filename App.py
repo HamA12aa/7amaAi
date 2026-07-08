@@ -26,7 +26,6 @@ def chunk_srt(text, size=30):
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def call_groq(client, prompt):
-    # بەکارهێنانی ناوی مۆدێلی دروست بۆ ڕێگری لە هەڵەی NotFound
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "user", "content": prompt}],
@@ -34,16 +33,13 @@ def call_groq(client, prompt):
     )
     return response.choices[0].message.content
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-def call_gemini(model, prompt):
-    return model.generate_content(prompt).text
-
 # --- سایدبار ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3172/3172576.png", width=100)
     st.title("⚙️ ڕێکخستنی پڕۆفیشناڵ")
     
-    gemini_key = st.text_input("🔑 Google Gemini Key:", value="AQ.Ab8RN6LnLbL0tInTU8sCyRJcjjr9Qi8fhlxwsxYTXhRSG5Cypw", type="password")
+    # تکایە دڵنیابە لە کلیلەکەی گووگڵ، پێویستە بە AIzaSy دەست پێ بکات
+    gemini_key = st.text_input("🔑 Google Gemini Key (بە AIza دەست پێ دەکات):", value="", type="password")
     groq_key = st.text_input("🔑 Groq Key (Llama):", value="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", type="password")
     
     st.markdown("---")
@@ -72,9 +68,7 @@ if st.button("🚀 دەستپێکردنی پڕۆسەی خێرا (Ultra Fast)"):
     else:
         try:
             client_groq = Groq(api_key=groq_key)
-            genai.configure(api_key=gemini_key)
-            model_gemini = genai.GenerativeModel("gemini-1.5-flash")
-
+            
             chunks = chunk_srt(input_srt, size=30)
             total_chunks = len(chunks)
             
@@ -82,10 +76,10 @@ if st.button("🚀 دەستپێکردنی پڕۆسەی خێرا (Ultra Fast)"):
             status_text = st.empty()
             final_srt_pieces = []
 
+            # قۆناغی ١: وەرگێڕان بە خێرایی Groq
             for idx, chunk in enumerate(chunks):
                 status_text.markdown(f"**⚡ بە خێرایی Groq وەرگێڕان دەکرێت... پارچەی {idx+1} لە {total_chunks}**")
                 
-                # قۆناغی ١ بە Groq: وەرگێڕانێکی سینەمایی ڕاستەوخۆ و خێرا
                 prompt_groq = f"""You are a professional movie subtitle translator. Translate this English SRT to perfect natural Kurdish Sorani.
 Rules:
 1. Do NOT change the timestamps or subtitle numbers.
@@ -99,32 +93,47 @@ SRT to translate:
                 translated_chunk = call_groq(client_groq, prompt_groq)
                 final_srt_pieces.append(translated_chunk)
                 progress_bar.progress((idx + 1) / total_chunks)
-                time.sleep(1) # کەمێک وەستان بۆ ئەوەی API بلۆکمان نەکات
+                time.sleep(1)
 
             combined_srt = "\n\n".join(final_srt_pieces)
+            final_result = combined_srt # ئەنجامەکە پارێزراو دەبێت ئەگەر گێمنایش کار نەکات
 
-            # قۆناغی کۆتایی: ئەگەر ڤیدیۆ هەبێت با Gemini سەیری بکات
+            # قۆناغی ٢: گێمنای (ئەگەر ڤیدیۆ هەبێت)
             if video_file:
-                with st.spinner("👁️ بریکاری ٥ (Gemini Vision): خەریکی شیکاری ڤیدیۆکەیە بۆ هاوکاتکردن..."):
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
-                        tmp.write(video_file.read())
-                        temp_path = tmp.name
-                    
-                    g_file = genai.upload_file(path=temp_path)
-                    while g_file.state.name == "PROCESSING":
-                        time.sleep(2)
-                        g_file = genai.get_file(g_file.name)
-                    
-                    prompt_5 = f"Watch this video. Here is the translated Kurdish SRT. Fix the subtitles slightly so they perfectly match the visual context and emotions on the screen. Output ONLY the final valid SRT format without any markdown blocks:\n\n{combined_srt}"
-                    
-                    final_result = call_gemini(model_gemini, [g_file, prompt_5])
-                    os.remove(temp_path)
-            else:
-                final_result = combined_srt
+                try:
+                    if not gemini_key:
+                        st.warning("⚠️ کلیلەکەی گێمنایت نەداوە! بۆیە بەبێ بینینی ڤیدیۆکە تەنها وەرگێڕانەکەی گرۆقت پێ دەدەم.")
+                    else:
+                        genai.configure(api_key=gemini_key)
+                        model_gemini = genai.GenerativeModel("gemini-1.5-flash")
+                        
+                        with st.spinner("👁️ بریکاری ٥ (Gemini Vision): خەریکی شیکاری ڤیدیۆکەیە بۆ هاوکاتکردن..."):
+                            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
+                                tmp.write(video_file.read())
+                                temp_path = tmp.name
+                            
+                            g_file = genai.upload_file(path=temp_path)
+                            while g_file.state.name == "PROCESSING":
+                                time.sleep(2)
+                                g_file = genai.get_file(g_file.name)
+                            
+                            prompt_5 = f"Watch this video. Here is the translated Kurdish SRT. Fix the subtitles slightly so they perfectly match the visual context and emotions on the screen. Output ONLY the final valid SRT format without any markdown blocks:\n\n{combined_srt}"
+                            
+                            r5 = model_gemini.generate_content([g_file, prompt_5])
+                            final_result = r5.text
+                            os.remove(temp_path)
+                            st.success("✅ ڤیدیۆکەش بە سەرکەوتوویی بینرا و ژێرنووسەکە گونجێندرا!")
+                
+                except Exception as gemini_error:
+                    st.error("⚠️ کێشەیەک لە کلیلەکەی گێمنای هەبوو (لەوانەیە هەڵە بێت یان بەسەرچووبێت)، بۆیە نەیتوانی ڤیدیۆکە بخوێنێتەوە.")
+                    st.success("بەهەرحاڵ خەمت نەبێت! کارەکەی گرۆقم بۆ پاراستویت و نەمفەوتاند.")
+                    # final_result هەر وەک خۆی دەمێنێتەوە کە بە گرۆق کراوە
 
-            # نیشاندانی ئەنجام
+            # نیشاندانی ئەنجام لە هەموو حاڵەتێکدا!
             output_placeholder.code(final_result, language="srt")
-            status_text.success("🎉 پڕۆسەکە بە سەرکەوتوویی کۆتایی هات!")
+            if not video_file or "gemini_error" in locals():
+                status_text.success("🎉 پڕۆسەی وەرگێڕان بە گرۆق بە سەرکەوتوویی کۆتایی هات!")
+            
             st.balloons()
             
             st.download_button(
@@ -135,4 +144,4 @@ SRT to translate:
             )
 
         except Exception as e:
-            st.error(f"❌ هەڵەیەک ڕوویدا: {str(e)}")
+            st.error(f"❌ هەڵەیەک لە گرۆق یان سیستەمەکە ڕوویدا: {str(e)}")
