@@ -8,177 +8,245 @@ import json
 import hashlib
 import concurrent.futures
 import requests
+import tempfile
 
 # ==========================================
-# 0. INITIAL STATE & DB
+# 0. ABSOLUTE INITIALIZATION (FIXING ATTRIBUTE ERROR)
 # ==========================================
-for k in ["is_running", "current_hash", "master_context", "translated_chunks", "console_logs", "final_srt"]:
-    if k not in st.session_state: st.session_state[k] = False if "is" in k else ""
-if "console_logs" not in st.session_state: st.session_state.console_logs = []
-if "translated_chunks" not in st.session_state: st.session_state.translated_chunks = {}
+if 'console_logs' not in st.session_state: st.session_state['console_logs'] = []
+if 'is_running' not in st.session_state: st.session_state['is_running'] = False
+if 'master_context' not in st.session_state: st.session_state['master_context'] = ""
+if 'translated_chunks' not in st.session_state: st.session_state['translated_chunks'] = {}
+if 'enriched_chunks' not in st.session_state: st.session_state['enriched_chunks'] = {}
+if 'final_srt' not in st.session_state: st.session_state['final_srt'] = ""
+if 'start_time' not in st.session_state: st.session_state['start_time'] = 0
 
+# ==========================================
+# 1. DATABASE & UI SETUP
+# ==========================================
 def init_db():
-    conn = sqlite3.connect('studio_v20.db', check_same_thread=False)
+    conn = sqlite3.connect('titan_v21.db', check_same_thread=False)
     conn.cursor().execute('''CREATE TABLE IF NOT EXISTS projects (hash TEXT PRIMARY KEY, context TEXT, trans TEXT)''')
     conn.commit()
     return conn
 
 db_conn = init_db()
 
-# ==========================================
-# 1. UI & DESIGN
-# ==========================================
-st.set_page_config(page_title="AI Movie Studio PRO | V20", layout="wide")
+st.set_page_config(page_title="AI Movie Studio PRO | V21", layout="wide")
+
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Vazirmatn&display=swap');
-    html, body, .stMarkdown { font-family: 'Vazirmatn', sans-serif; background-color: #050505; color: white; }
-    .main-title { text-align: center; color: #00ffcc; font-size: 3rem; font-weight: 800; text-shadow: 0 0 10px #00ffcc; }
-    .console { background: #000; border: 1px solid #333; padding: 10px; height: 250px; overflow-y: auto; color: #00ff00; font-family: monospace; direction: ltr; }
-    .preview { background: #111; padding: 20px; border-radius: 10px; border-top: 4px solid #ff0055; direction: rtl; text-align: right; height: 350px; overflow-y: auto; }
+    @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700&display=swap');
+    html, body, [data-testid="stSidebar"], .stMarkdown { font-family: 'Vazirmatn', sans-serif; background-color: #050505; color: #eee; }
+    .main-title { text-align: center; font-weight: 800; background: linear-gradient(90deg, #00ffcc, #ff0055); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3.5rem; }
+    .console-box { background: #000; border: 1px solid #333; padding: 15px; height: 280px; overflow-y: auto; color: #00ff00; font-family: 'Courier New', monospace; font-size: 0.9em; border-radius: 10px; box-shadow: inset 0 0 10px #00ff0022; }
+    .live-preview { background: #111; padding: 20px; border-radius: 15px; border-top: 5px solid #ff0055; direction: rtl; text-align: right; height: 400px; overflow-y: auto; font-size: 1.2em; line-height: 1.8; }
+    .status-card { background: #1a1a1a; padding: 15px; border-radius: 10px; border-left: 5px solid #00ffcc; margin-bottom: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. CORE LOGIC & API
+# 2. CORE UTILS & API
 # ==========================================
 def log(msg, color="lime"):
-    st.session_state.console_logs.append(f"<span style='color:{color}'>- {msg}</span>")
-    if len(st.session_state.console_logs) > 50: st.session_state.console_logs.pop(0)
+    timestamp = time.strftime("%H:%M:%S")
+    st.session_state['console_logs'].append(f"<span style='color:grey'>[{timestamp}]</span> <span style='color:{color}'>- {msg}</span>")
+    if len(st.session_state['console_logs']) > 100: st.session_state['console_logs'].pop(0)
 
-def call_gemini_api(prompt, api_key, model_name):
-    # ناردنی ڕاستەوخۆ بە فلتەری کوژاوە
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+def call_rest_api(prompt, api_key, model="gemini-1.5-flash", temp=0.3):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "safetySettings": [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-        ],
-        "generationConfig": {"temperature": 0.2, "topP": 0.8, "topK": 40}
+        "safetySettings": [{"category": c, "threshold": "BLOCK_NONE"} for c in ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]],
+        "generationConfig": {"temperature": temp, "maxOutputTokens": 4096}
     }
     try:
-        response = requests.post(url, json=payload, timeout=50)
+        response = requests.post(url, json=payload, timeout=60)
         if response.status_code == 200:
-            res_json = response.json()
-            if 'candidates' in res_json:
-                return res_json['candidates'][0]['content']['parts'][0]['text']
-        return f"ERROR_CODE_{response.status_code}"
-    except Exception as e:
-        return f"EXCEPTION_{str(e)}"
+            return response.json()['candidates'][0]['content']['parts'][0]['text']
+        return f"ERROR_{response.status_code}"
+    except:
+        return "ERROR_TIMEOUT"
 
 # ==========================================
-# 3. AGENT LOGIC
+# 3. THE 3-AGENT ARCHITECTURE (ENHANCED)
 # ==========================================
-def translate_chunk(chunk, context, keys, model):
-    xml_data = "".join([f'<line id="{item["id"]}">{item["text"]}</line>\n' for item in chunk])
+
+# بریکاری ١: شیکەرەوەی قووڵ
+def agent_1_master_analysis(srt_text, glossary, keys, model, video_file=None):
+    log("بریکاری ١: دەستی کرد بە شیکاری قووڵی چیرۆک و ڤیدیۆ...", "yellow")
+    prompt = f"""Analyze this anime/movie script and create a Translation Bible.
+1. Summary of plot. 2. Tone of characters. 3. Cultural nuance. 
+Glossary: {glossary}
+Script: {srt_text[:10000]}"""
     
-    prompt = f"""You are a professional Kurdish Sorani translator. 
-Context: {context}
-Task: Translate every single line to Kurdish Sorani perfectly.
+    # لێرەدا دەتوانیت لۆژیکی ڤیدیۆ زیاد بکەیت ئەگەر کلیلەکانت لیمیت نەکراون، بۆ خێرایی تەنها تێکست بەکاردێنین
+    res = call_rest_api(prompt, random.choice(keys), model)
+    if "ERROR" in res: return "Translate with high cinematic emotion."
+    return res
 
-RULES:
-1. Output ONLY the Kurdish translation inside <line id="X">...</line> tags.
-2. NEVER keep English text.
-3. Keep the original ID.
+# بریکاری ٢: دروستکەری نەخشە (Enricher)
+def agent_2_blueprint(chunk, context, keys, model):
+    xml_input = "".join([f'<line id="{i["id"]}">{i["text"]}</line>' for i in chunk])
+    prompt = f"""You are AGENT 2 (The Mastermind). Context: {context}
+For each line, output this XML exactly:
+<line id="X">
+  <jp>Guess Japanese/Anime expression</jp>
+  <emotion>Tone of scene</emotion>
+  <sug1>Literal Kurdish</sug1>
+  <sug2>Simple Kurdish</sug2>
+  <sug3>Cinematic Kurdish (Epic/Anime style)</sug3>
+</line>
 
 Input:
-{xml_data}"""
+{xml_input}"""
+    
+    res = call_rest_api(prompt, random.choice(keys), model, temp=0.4)
+    if "ERROR" in res: return None
+    
+    # پارس کردنی بلۆکەکان
+    data = {}
+    matches = re.findall(r'<line id="(\d+)">(.*?)</line>', res, re.DOTALL)
+    for b_id, content in matches: data[b_id.strip()] = content.strip()
+    return data
 
-    for _ in range(3): # ٣ جار هەوڵ دەداتەوە ئەگەر ئێرۆر بوو
-        key = random.choice(keys)
-        result = call_gemini_api(prompt, key, model)
-        if "ERROR" not in result and "EXCEPTION" not in result:
-            # پاککردنەوە و دەرهێنانی داتا
-            matches = re.findall(r'<line id="(\d+)">(.*?)</line>', result, re.DOTALL)
-            if matches:
-                return {m[0]: m[1].strip() for m in matches}
-        time.sleep(2)
-    return None
+# بریکاری ٣: وەرگێڕی کۆتایی (Finalizer)
+def agent_3_translator(chunk, blueprint, keys, model):
+    input_combined = ""
+    for item in chunk:
+        b_id = str(item['id'])
+        info = blueprint.get(b_id, f"<sug3>{item['text']}</sug3>")
+        input_combined += f'<line id="{b_id}">\nENG: {item["text"]}\nINFO: {info}\n</line>\n'
+
+    prompt = f"""You are AGENT 3 (The Final Director).
+Look at the English and the 3 Kurdish suggestions. 
+Pick/Create the most perfect, cinematic Kurdish Sorani translation.
+RULES: 
+1. NEVER shorten sentences. 
+2. If text > 45 chars, split with \\n.
+3. OUTPUT ONLY: <line id="X">Perfect Kurdish</line>
+
+Input:
+{input_combined}"""
+
+    res = call_rest_api(prompt, random.choice(keys), model, temp=0.2)
+    if "ERROR" in res: return None
+    
+    matches = re.findall(r'<line id="(\d+)">(.*?)</line>', res, re.DOTALL)
+    return {m[0]: m[1].strip() for m in matches} if matches else None
 
 # ==========================================
-# 4. MAIN APP
+# 4. SWARM PIPELINE (PARALLEL)
 # ==========================================
-st.markdown("<h1 class='main-title'>AI Movie Studio PRO V20</h1>", unsafe_allow_html=True)
+def process_chunk_swarm(idx, chunk, context, keys, model):
+    # هەنگاوی ١: بریکاری ٢
+    blueprint = agent_2_blueprint(chunk, context, keys, model)
+    if not blueprint: return idx, None, "❌ بریکاری ٢ شکستی هێنا"
+    
+    # هەنگاوی ٢: بریکاری ٣
+    final_res = agent_3_translator(chunk, blueprint, keys, model)
+    if not final_res: return idx, None, "❌ بریکاری ٣ شکستی هێنا"
+    
+    # ئامادەکردنی داتا
+    translated_lines = []
+    for item in chunk:
+        new_item = item.copy()
+        if item['id'] in final_res:
+            new_item['text'] = final_res[item['id']]
+        translated_lines.append(new_item)
+    
+    return idx, translated_lines, "✅ سەرکەوتوو بوو"
+
+# ==========================================
+# 5. UI LAYOUT
+# ==========================================
+st.markdown("<h1 class='main-title'>AI MOVIE STUDIO TITAN V21</h1>", unsafe_allow_html=True)
 
 with st.sidebar:
-    st.header("🔑 API Keys")
-    keys = [st.text_input(f"Key {i+1}", type="password") for i in range(4)]
-    active_keys = [k.strip() for k in keys if k.strip()]
-    model_name = st.selectbox("Model", ["gemini-1.5-flash", "gemini-1.5-pro"])
-    glossary = st.text_area("Glossary")
-    if st.button("🗑️ Clear Database"):
-        db_conn.cursor().execute("DELETE FROM projects")
-        db_conn.commit()
-        st.experimental_rerun()
+    st.header("🔑 API ACCESS")
+    keys_input = [st.text_input(f"API Key {i+1}", type="password") for i in range(4)]
+    active_keys = [k.strip() for k in keys_input if k.strip()]
+    
+    st.markdown("---")
+    model_choice = st.selectbox("Intelligence Level", ["gemini-1.5-flash", "gemini-1.5-pro"])
+    glossary = st.text_area("📚 Glossary / فەرهەنگ")
+    
+    if st.button("🗑️ Reset All Data"):
+        st.session_state.clear()
+        st.rerun()
 
-input_srt = st.text_area("Paste SRT here", height=250)
-
-tab1, tab2 = st.tabs(["🚀 Translation Studio", "✅ Output"])
+tab1, tab2, tab3 = st.tabs(["🎬 Production", "🖥️ System Logs", "📥 Export"])
 
 with tab1:
-    col_run, col_status = st.columns([1, 2])
-    with col_run:
-        if st.button("START TRANSLATION"):
-            if input_srt and active_keys:
-                st.session_state.current_hash = hashlib.md5(input_srt.encode()).hexdigest()
-                st.session_state.is_running = True
-                st.session_state.translated_chunks = {}
-                
-    console_placeholder = st.empty()
-    preview_placeholder = st.empty()
+    input_srt = st.text_area("Paste SRT Content Here", height=250)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        start_btn = st.button("🚀 LAUNCH TITAN ENGINE")
+    with col2:
+        if input_srt:
+            line_count = len(re.split(r'\n\n+', input_srt.strip()))
+            st.info(f"Detected: {line_count} Lines | ETA: ~{int(line_count/15 * 1.2)} min")
 
-    if st.session_state.is_running:
-        # 1. شیکاری سەرەتایی
-        if not st.session_state.master_context:
-            log("Analyzing story context...", "cyan")
-            ctx_prompt = f"Summarize the characters and tone of this movie: {input_srt[:5000]}"
-            st.session_state.master_context = call_gemini_api(ctx_prompt, random.choice(active_keys), model_name)
-        
-        # 2. پارچەکردن (١٥ دێڕ)
+    if start_btn and active_keys and input_srt:
+        st.session_state['is_running'] = True
+        st.session_state['start_time'] = time.time()
+        st.session_state['translated_chunks'] = {}
+        st.session_state['master_context'] = ""
+        st.session_state['console_logs'] = []
+
+    # UI Elements for Progress
+    console_ui = st.empty()
+    preview_ui = st.empty()
+
+    if st.session_state['is_running']:
+        # Step 1: Master Context
+        if not st.session_state['master_context']:
+            st.session_state['master_context'] = agent_1_master_analysis(input_srt, glossary, active_keys, model_choice)
+            log("✅ بریکاری ١: شیکاری چیرۆک کۆتایی هات.", "lime")
+
+        # Step 2: Parse & Chunk
         blocks = re.split(r'\n\n+', input_srt.strip())
         parsed = []
         for b in blocks:
             lines = b.split('\n')
             if len(lines) >= 3:
-                parsed.append({'id': lines[0], 'time': lines[1], 'text': '\n'.join(lines[2:])})
+                parsed.append({'id': lines[0].strip(), 'time': lines[1].strip(), 'text': '\n'.join(lines[2:]).strip()})
         
-        chunks = [parsed[i:i+15] for i in range(0, len(parsed), 15)]
+        chunks = [parsed[i:i+12] for i in range(0, len(parsed), 12)] # هەر جارەی ١٢ دێڕ بۆ کوالێتی بەرز
         
-        for i, chunk in enumerate(chunks):
-            if i not in st.session_state.translated_chunks:
-                log(f"Translating chunk {i+1}/{len(chunks)}...")
-                result = translate_chunk(chunk, st.session_state.master_context, active_keys, model_name)
-                
+        # Parallel Execution
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(active_keys)) as executor:
+            futures = {executor.submit(process_chunk_swarm, i, chunk, st.session_state['master_context'], active_keys, model_choice): i for i, chunk in enumerate(chunks)}
+            
+            for future in concurrent.futures.as_completed(futures):
+                idx, result, status = future.result()
                 if result:
-                    # گۆڕینی ئینگلیزی بۆ کوردی لەناو پارچەکەدا
-                    for item in chunk:
-                        if item['id'] in result:
-                            item['text'] = result[item['id']]
-                    st.session_state.translated_chunks[i] = chunk
-                    log(f"Chunk {i+1} Success ✅", "lime")
+                    st.session_state['translated_chunks'][idx] = result
+                    log(f"پارچەی {idx+1}: {status}", "lime")
                 else:
-                    log(f"Chunk {i+1} Failed ❌ (Google rejected the request)", "red")
-                    # هێشتنەوەی ئینگلیزییەکە تەنها بۆ ئەوەی بەرنامەکە نەوەستێت
-                    st.session_state.translated_chunks[i] = chunk
+                    log(f"پارچەی {idx+1}: {status}", "red")
                 
-                # Update UI
-                console_placeholder.markdown(f"<div class='console'>{'<br>'.join(st.session_state.console_logs)}</div>", unsafe_allow_html=True)
+                # Live Refresh UI
+                with console_ui:
+                    st.markdown(f"<div class='console-box'>{''.join(st.session_state['console_logs'])}</div>", unsafe_allow_html=True)
                 
-                all_items = []
-                for k in sorted(st.session_state.translated_chunks.keys()):
-                    all_items.extend(st.session_state.translated_chunks[k])
-                
-                preview_text = "\n\n".join([f"{x['id']}\n{x['time']}\n{x['text']}" for x in all_items])
-                preview_placeholder.markdown(f"<div class='preview'>{preview_text[-1000:].replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
-                
-        st.session_state.final_srt = "\n\n".join([f"{x['id']}\n{x['time']}\n{x['text']}" for x in all_items])
-        st.session_state.is_running = False
-        st.success("Translation finished!")
+                with preview_ui:
+                    all_trans = []
+                    for k in sorted(st.session_state['translated_chunks'].keys()): all_trans.extend(st.session_state['translated_chunks'][k])
+                    preview_text = "\n\n".join([f"{x['id']}\n{x['time']}\n{x['text']}" for x in all_trans])
+                    st.markdown(f"<div class='live-preview'>{preview_text[-1200:].replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
+
+        st.session_state['is_running'] = False
+        st.success("TITAN ENGINE COMPLETED.")
 
 with tab2:
-    if st.session_state.final_srt:
-        st.download_button("Download SRT", st.session_state.final_srt, "Final_Kurdish.srt")
-        st.text_area("Final Content", st.session_state.final_srt, height=400)
+    st.markdown(f"<div class='console-box' style='height:600px;'>{''.join(st.session_state['console_logs'])}</div>", unsafe_allow_html=True)
+
+with tab3:
+    all_final = []
+    for k in sorted(st.session_state['translated_chunks'].keys()): all_final.extend(st.session_state['translated_chunks'][k])
+    if all_final:
+        final_srt_text = "\n\n".join([f"{x['id']}\n{x['time']}\n{x['text']}" for x in all_final])
+        st.download_button("📥 DOWNLOAD FINAL SRT", final_srt_text, "Titan_Studio_PRO.srt")
+        st.text_area("Final Output Raw", final_srt_text, height=400)
