@@ -1,3 +1,24 @@
+import os
+import subprocess
+
+# ئەم بەشە بە زۆر کتێبخانەکان دادەبەزێنێت ئەگەر سێرڤەرەکە نەیخوێندبێتەوە
+try:
+    import groq
+    import google.generativeai
+    import moviepy
+except ImportError:
+    subprocess.check_call(["pip", "install", "groq", "google-generativeai", "moviepy==1.0.3"])
+
+# پاشان ئینپۆرتە ئاساییەکانی خۆت لێرەوە دەست پێدەکات
+import streamlit as st
+import google.generativeai as genai
+from groq import Groq
+import tempfile
+import time
+# ... (بەردەوامی کۆدەکەی پێشووتر) ...
+
+
+
 import streamlit as st
 import google.generativeai as genai
 from groq import Groq
