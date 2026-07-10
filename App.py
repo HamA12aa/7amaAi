@@ -50,14 +50,14 @@ def extract_and_transcribe(video_path, groq_key):
         
         if os.path.exists(audio_path):
             os.remove(audio_path)
-        return trans
+        return trans.text
     except Exception as e:
         return f"کێشە لە دەرهێنانی دەنگ: {str(e)}"
 
 # ==========================================
 # 3. بریکاری یەکەم: شیکاری دەق (Agent 1)
 # ==========================================
-def run_agent1(keys, srt_text):
+def run_agent1(keys, model_name, srt_text):
     prompt = f"""You are 'Agent 1: The Master Lore Architect'.
 Your task is to analyze this SRT file in **Kurdish (Sorani)**.
 DO NOT TRANSLATE IT. IGNORE ALL SONGS AND LYRICS completely.
@@ -74,15 +74,16 @@ SRT Text:
     for key in keys:
         try:
             genai.configure(api_key=key)
-            model = genai.GenerativeModel("gemini-1.5-pro")
+            model = genai.GenerativeModel(model_name)
             return model.generate_content(prompt).text
-        except: continue
-    return "❌ کێشە لە بریکاری یەکەم ڕوویدا."
+        except Exception as e: 
+            continue
+    return "❌ کێشە لە بریکاری یەکەم ڕوویدا. دڵنیابە لە کلیلەکان و مۆدێلەکە."
 
 # ==========================================
 # 4. بریکاری دووەم: لێکۆڵەری ڤیدیۆ (Agent 2)
 # ==========================================
-def run_agent2(keys, video_path, srt_text, audio_transcript):
+def run_agent2(keys, model_name, video_path, srt_text, audio_transcript):
     for key in keys:
         try:
             genai.configure(api_key=key)
@@ -110,7 +111,7 @@ Format your output in **Kurdish Sorani** exactly like this:
 SRT Text: {srt_text[:20000]}
 Actual Audio Transcript from Groq: {audio_transcript}
 """
-            model = genai.GenerativeModel("gemini-1.5-flash")
+            model = genai.GenerativeModel(model_name)
             response = model.generate_content([prompt, uploaded_file])
             genai.delete_file(uploaded_file.name)
             return response.text
@@ -131,6 +132,25 @@ with st.sidebar:
     
     st.markdown("---")
     groq_key = st.text_input("Groq API Key (بۆ دەنگ):", type="password").strip()
+    
+    st.markdown("---")
+    st.header("⚙️ هەڵبژاردنی مۆدێلەکان")
+    available_models = []
+    
+    # هێنانەخوارەوەی ناوە دروستەکان بەپێی کلیلەکەت بۆ ڕێگری لە ئێرۆری 404
+    if active_g_keys:
+        try:
+            genai.configure(api_key=active_g_keys[0])
+            available_models = [m.name.replace('models/', '') for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        except:
+            st.error("کێشە لە کلیلەکانی Gemini هەیە، ناتوانرێت مۆدێلەکان بخوێنرێتەوە.")
+    
+    if available_models:
+        agent1_model = st.selectbox("بریکاری ١ (شیکاری دەق - هەوڵدە Pro بێت):", available_models, index=0)
+        agent2_model = st.selectbox("بریکاری ٢ (سەیرکردنی ڤیدیۆ - هەوڵدە Flash بێت):", available_models, index=len(available_models)-1 if len(available_models)>1 else 0)
+    else:
+        agent1_model, agent2_model = None, None
+        st.warning("تکایە کلیلی Gemini دابنێ بۆ بینینی مۆدێلەکان.")
 
 col1, col2 = st.columns(2)
 with col1:
@@ -141,6 +161,8 @@ with col2:
 if st.button("🚀 دەستپێکردنی ستۆدیۆ (بە هەنگاو)"):
     if not active_g_keys or not groq_key or not input_srt or not uploaded_video:
         st.warning("تکایە هەموو کلیلەکان و فایلەکان بە دروستی داخڵ بکە.")
+    elif not agent1_model or not agent2_model:
+        st.error("تکایە دڵنیابە کە مۆدێلەکانت هەڵبژاردووە لە لای ڕاست.")
     else:
         with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
             tmp_file.write(uploaded_video.read())
@@ -153,12 +175,12 @@ if st.button("🚀 دەستپێکردنی ستۆدیۆ (بە هەنگاو)"):
         audio_text = extract_and_transcribe(tmp_video_path, groq_key)
         
         # هەنگاوی ٢: بریکاری یەکەم
-        status_box.info("🕵️ هەنگاوی ٢: بریکاری یەکەم خەریکی دروستکردنی چیرۆکەکەیە...")
-        agent1_result = run_agent1(active_g_keys, input_srt)
+        status_box.info(f"🕵️ هەنگاوی ٢: بریکاری یەکەم خەریکی دروستکردنی چیرۆکەکەیە بە مۆدێلی {agent1_model}...")
+        agent1_result = run_agent1(active_g_keys, agent1_model, input_srt)
         
         # هەنگاوی ٣: بریکاری دووەم
-        status_box.info("🎥 هەنگاوی ٣: بریکاری دووەم ڤیدیۆکە دەبینێت و هەڵەکان دەدۆزێتەوە... (چاوەڕێبە)")
-        agent2_result = run_agent2(active_g_keys, tmp_video_path, input_srt, audio_text)
+        status_box.info(f"🎥 هەنگاوی ٣: بریکاری دووەم ڤیدیۆکە دەبینێت بە مۆدێلی {agent2_model}... (چاوەڕێبە)")
+        agent2_result = run_agent2(active_g_keys, agent2_model, tmp_video_path, input_srt, audio_text)
         
         status_box.empty()
         if os.path.exists(tmp_video_path):
